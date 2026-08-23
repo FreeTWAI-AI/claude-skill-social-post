@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "managed_paths": [
+    "SKILL.md",
+    "agents/openai.yaml",
+    "references/generate_and_publish.md",
+    "references/outcome-workflow.md",
+    "references/phase0_plan.md",
+    "references/x.md",
+    "scripts/build_rule_registry.py",
+    "scripts/log_outcome.py",
+    "scripts/self_test.py",
+    "scripts/social_data.py",
+    "scripts/social_store.py",
+    "scripts/social_validation.py",
+    "scripts/split_case_archive.py",
+    "scripts/split_formula_archive.py",
+    "scripts/split_rule_archive.py",
+    "scripts/sync_public.py"
+  ]
+}

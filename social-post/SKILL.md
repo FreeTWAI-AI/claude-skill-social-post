@@ -9,7 +9,7 @@ description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語
 
 ## Session 啟動
 
-P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要求深度仿寫，或 quick card 無法裁決時，才完整讀 `style_profile.md`／`hao-voice`。安全與使用者明示 > voice quick／明確載入的 hao-voice > 公式。
+P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要求深度仿寫，或 quick card 無法裁決時，才完整讀 `style_profile.md` 或使用者明確指定的 voice Skill。安全與使用者明示 > voice quick／明確指定的 voice Skill > 公式。
 
 ## 路由
 
@@ -32,6 +32,7 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 | 洞察快照 | `data/insight_snapshots.jsonl` |
 | 帳號期間總覽 | `data/account_snapshots.jsonl` |
 | 跨篇假設與 confound | `data/experiments.jsonl` |
+| 事實修正事件 | `data/corrections.jsonl`；原始 event 不覆寫 |
 | 規則正文 | `references/rules/RNN.md`；`references/rules.md` 是索引 |
 | 規則生命週期／實驗 backlink | `references/rules/metadata.json` |
 | 規則機器索引 | `data/rule_registry.json`（生成檔） |
@@ -48,11 +49,11 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 
 ## P3 Log Outcome
 
-1. 每組洞察圖建立新 snapshot；不覆蓋舊數字。
+1. 每組洞察圖建立新 snapshot；不覆蓋舊數字。既有 event 的發布時間、片長或精度要修正時，追加 correction event，不直接改舊列。
    帳號 7／30／90 天總覽寫 `account_snapshots.jsonl`，不得綁到單篇貼文。
 2. 記 published_at、captured_at、hours_since_publish 與 maturity。
 3. IG／FB total 與可取得的拆分同時保存；missing 用 `null`。
-4. UI rate 與 derived rate 分開；留存曲線目測只寫 note。
+4. UI rate 與 derived rate 分開；留存曲線目測只寫 note。縮寫、上限或目測數字用 `metric_qualifiers` 標成 `rounded／upper_bound／visual_estimate`，不得冒充 exact。
 5. 先 dry-run `scripts/log_outcome.py`，明確寫入時才加 `--write`。
 6. 寫完執行 `scripts/social_data.py validate`。
 
@@ -82,13 +83,14 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 - 每次 outcome 更新後跑 data validate、rule registry build、cleanup drift audit。
 - 修改任一 `rules/RNN.md` 後跑 `split_rule_archive.py --refresh-manifest`，再 build rule registry。
 - `case_studies.md` 只保留索引；新增 Case 寫獨立檔或直接以 structured outcome 取代。
-- 公開 export 使用 allowlist：`voice_quick.md`／`current_brief.md` 已是去快照的操作卡，可公開；不得公開完整 `style_profile.md`、`content_plan.md`、`drafts/`、outcome JSONL、`references/cases/`、`.rd/`。
+- 公開 export 使用 allowlist：只公開通用引擎、匿名範例與去快照操作卡；不得公開完整 `style_profile.md`、`content_plan.md`、`drafts/`、任何 outcome／correction JSONL、私人 rules／formulas／cases 或 `.rd/`。同步工具必須先跑 privacy preflight，BLOCK 時不得寫入鏡像。
+- 維護公開版時，先同步、再驗證公開鏡像；只有當輪使用者明確授權 release 時，才交由 R&D external-change gate 推送。不得把一次授權永久化。
 - 私公版路徑只從 `audit.config.json` 讀；未設定就回報 NOT_CHECKED，不猜 sibling repo。
 
 ```powershell
 $env:PYTHONUTF8='1'
 python scripts/social_data.py validate
-python scripts/social_data.py summary --series reborn-married-driver
+python scripts/social_data.py summary --series <series-id>
 python scripts/build_rule_registry.py --write
 python ../code-cleanup-helper/scripts/audit.py . --mode all
 ```

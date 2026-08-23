@@ -15,8 +15,9 @@
 2. `data/insight_snapshots.jsonl`：同一貼文可有多個時間快照，永遠保留 `captured_at` 與 maturity。
 3. `data/account_snapshots.jsonl`：帳號 7／30／90 天滾動總覽；不綁任何單篇貼文。
 4. `data/experiments.jsonl`：跨貼文假設、變因、confound、證據狀態與下一輪測試。
-5. `data/rule_registry.json`：由 `references/rules/RNN.md` 生成的導航，不是規則正文。
-6. `references/case_studies.md`：舊案例索引；個別全文在 `references/cases/`，只作歷史證據。
+5. `data/corrections.jsonl`：既有 event 的事實修正；append-only，原始列不覆寫。
+6. `data/rule_registry.json`：由 `references/rules/RNN.md` 生成的導航，不是規則正文。
+7. `references/case_studies.md`：舊案例索引；個別全文在 `references/cases/`，只作歷史證據。
 
 不得再把新數據只寫進 prose。結構化資料是成效事實的 canonical source；Markdown 只留解讀與人類可讀摘要。
 
@@ -30,7 +31,9 @@
 3. IG／FB 合併面板保留 total，也記可取得的平台拆分。未拆出的 follower／follow 指標加 scope note。
 4. UI 顯示率保留在 `rates_reported`；手算 derived metric 不覆蓋 UI 值。
 5. Retention 圖沒有精確座標時只寫 curve note，不偽造百分比。
-6. 先 dry-run bundle，再以 `--write` 寫入；最後跑 validate。
+6. 平台縮寫值、`<0.1%`、圖上目測值分別以 `metric_qualifiers` 標成 `rounded`、`upper_bound`、`visual_estimate`；未標者才視為 exact。
+7. 發現發布時間、片長或舊快照精度錯誤時，bundle 追加 `correction`；不得直接重寫既有 JSONL event。Correction 不可改任何 identity field。
+8. 先 dry-run bundle，再以 `--write` 寫入；最後跑 validate。
 
 ## Optimize Patterns
 
@@ -50,6 +53,7 @@
 - 時間使用 ISO 8601＋offset，例如 `2026-08-11T14:56:00+08:00`。
 - 百分比一律存 0–100，不存 0–1。
 - Missing value 用 `null`，不填 0。
+- Measurement qualifier 只用 `exact／rounded／lower_bound／upper_bound／visual_estimate／not_reported`。
 - Evidence status 只用 `hypothesis／emerging／validated／deprecated`。
 - 同系列多集不等於獨立樣本；在 `independent_samples` 明示。
 
@@ -66,7 +70,7 @@
 ```powershell
 $env:PYTHONUTF8='1'
 python scripts/social_data.py validate
-python scripts/social_data.py summary --series reborn-married-driver
+python scripts/social_data.py summary --series <series-id>
 python scripts/log_outcome.py outcome-bundle.json
 python scripts/log_outcome.py outcome-bundle.json --write
 python scripts/build_rule_registry.py --write

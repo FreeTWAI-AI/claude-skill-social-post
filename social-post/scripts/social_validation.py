@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +13,15 @@ MATURITY_VALUES = {
 }
 EVIDENCE_VALUES = {"hypothesis", "emerging", "validated", "deprecated"}
 PLATFORM_VALUES = {"facebook", "instagram", "youtube", "threads", "x"}
+CONFIDENCE_VALUES = {"low", "medium", "high"}
+MEASUREMENT_QUALIFIERS = {
+    "exact", "rounded", "lower_bound", "upper_bound", "visual_estimate", "not_reported",
+}
+CORRECTION_TARGETS = {
+    "post": ("post_id", {"post_id"}),
+    "snapshot": ("snapshot_id", {"snapshot_id", "post_id"}),
+    "account_snapshot": ("account_snapshot_id", {"account_snapshot_id", "platform"}),
+}
 
 
 def parse_time(value: str) -> datetime:
@@ -50,6 +60,83 @@ def validate_percent_mapping(value: Any, path: str, errors: list[str]) -> list[f
     return values
 
 
+def validate_metric_qualifiers(record: dict[str, Any], label: str, errors: list[str]) -> None:
+    qualifiers = record.get("metric_qualifiers", {})
+    if not isinstance(qualifiers, dict):
+        errors.append(f"{label}.metric_qualifiers must be an object")
+        return
+    metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
+    for metric, qualifier in qualifiers.items():
+        if metric not in metrics:
+            errors.append(f"{label}.metric_qualifiers.{metric} references a missing metric")
+        if qualifier not in MEASUREMENT_QUALIFIERS:
+            errors.append(
+                f"{label}.metric_qualifiers.{metric} must be one of {sorted(MEASUREMENT_QUALIFIERS)}"
+            )
+
+
+def _merge_changes(record: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(record)
+    for key, value in changes.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _merge_changes(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def materialize_corrections(
+    posts: list[dict[str, Any]],
+    snapshots: list[dict[str, Any]],
+    account_snapshots: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
+    errors: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply append-only factual corrections while preserving the original ledgers."""
+    collections = {
+        "post": copy.deepcopy(posts),
+        "snapshot": copy.deepcopy(snapshots),
+        "account_snapshot": copy.deepcopy(account_snapshots),
+    }
+    indexes = {
+        kind: {row.get(id_key): index for index, row in enumerate(collections[kind])}
+        for kind, (id_key, _forbidden) in CORRECTION_TARGETS.items()
+    }
+    seen: set[str] = set()
+    for index, correction in enumerate(corrections, start=1):
+        label = f"corrections.jsonl:{index}"
+        correction_id = correction.get("correction_id")
+        if not isinstance(correction_id, str) or not correction_id.strip():
+            errors.append(f"{label} correction_id must be a non-empty string")
+        elif correction_id in seen:
+            errors.append(f"{label} duplicate correction_id {correction_id}")
+        else:
+            seen.add(correction_id)
+        try:
+            parse_time(correction.get("recorded_at", ""))
+        except ValueError:
+            errors.append(f"{label} invalid recorded_at (ISO 8601 with offset required)")
+        kind = correction.get("target_type")
+        if kind not in CORRECTION_TARGETS:
+            errors.append(f"{label} target_type must be one of {sorted(CORRECTION_TARGETS)}")
+            continue
+        target_id = correction.get("target_id")
+        if target_id not in indexes[kind]:
+            errors.append(f"{label} references unknown {kind} {target_id}")
+            continue
+        changes = correction.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            errors.append(f"{label} changes must be a non-empty object")
+            continue
+        forbidden = CORRECTION_TARGETS[kind][1].intersection(changes)
+        if forbidden:
+            errors.append(f"{label} cannot change identity fields {sorted(forbidden)}")
+            continue
+        row_index = indexes[kind][target_id]
+        collections[kind][row_index] = _merge_changes(collections[kind][row_index], changes)
+    return collections["post"], collections["snapshot"], collections["account_snapshot"]
+
+
 def _validate_post(post: dict[str, Any], label: str, post_ids: set[str], errors: list[str], warnings: list[str]) -> None:
     for key in ("post_id", "published_at", "platforms", "caption"):
         if key not in post:
@@ -73,6 +160,8 @@ def _validate_post(post: dict[str, Any], label: str, post_ids: set[str], errors:
     )
     if invalid_platforms:
         errors.append(f"{label} platforms must be a unique non-empty list from {sorted(PLATFORM_VALUES)}")
+    if post.get("published_at_confidence") not in (None, *CONFIDENCE_VALUES):
+        errors.append(f"{label} invalid published_at_confidence {post.get('published_at_confidence')}")
     duration = post.get("duration_seconds")
     if duration is not None and (
         not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration <= 0
@@ -188,7 +277,7 @@ def _validate_snapshot(
         warnings.append(f"{label} hours_since_publish differs from timestamps by more than 1 hour")
     if snapshot.get("maturity") is not None and snapshot.get("maturity") not in MATURITY_VALUES:
         errors.append(f"{label} invalid maturity {snapshot.get('maturity')}")
-    if snapshot.get("captured_at_confidence") not in (None, "low", "medium", "high"):
+    if snapshot.get("captured_at_confidence") not in (None, *CONFIDENCE_VALUES):
         errors.append(f"{label} invalid captured_at_confidence {snapshot.get('captured_at_confidence')}")
     scope = snapshot.get("platform_scope") or "combined"
     if scope != "combined" and scope not in posts_by_id[post_id].get("platforms", []):
@@ -198,6 +287,7 @@ def _validate_snapshot(
         errors.append(f"{label} metrics must be an object")
         return post_id, captured
     non_negative_numbers(metrics, f"{label}.metrics", errors)
+    validate_metric_qualifiers(snapshot, label, errors)
     validate_percent_mapping(snapshot.get("rates_reported", {}), f"{label}.rates_reported", errors)
     _validate_breakdown(snapshot, posts_by_id[post_id], label, errors, warnings)
     sources = validate_percent_mapping(snapshot.get("traffic_sources_percent", {}), f"{label}.traffic_sources_percent", errors)
@@ -262,13 +352,14 @@ def validate_account_snapshots(
         window_days = snapshot.get("window_days")
         if not isinstance(window_days, int) or isinstance(window_days, bool) or window_days < 1:
             errors.append(f"{label} window_days must be a positive integer")
-        if snapshot.get("captured_at_confidence") not in (None, "low", "medium", "high"):
+        if snapshot.get("captured_at_confidence") not in (None, *CONFIDENCE_VALUES):
             errors.append(f"{label} invalid captured_at_confidence {snapshot.get('captured_at_confidence')}")
         metrics = snapshot.get("metrics")
         if not isinstance(metrics, dict):
             errors.append(f"{label} metrics must be an object")
         else:
             non_negative_numbers(metrics, f"{label}.metrics", errors)
+            validate_metric_qualifiers(snapshot, label, errors)
         if platform in PLATFORM_VALUES and captured is not None:
             previous = latest.get(platform)
             if previous is None or parse_time(previous["captured_at"]) < captured:

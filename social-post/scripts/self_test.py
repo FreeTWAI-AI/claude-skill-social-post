@@ -11,6 +11,7 @@ from build_rule_registry import build
 from log_outcome import prepare_records, validate_staged
 from social_data import SKILL_ROOT, series_summary, validate_store
 from social_store import commit_records
+from sync_public import managed_paths, privacy_violations, safe_destination, write_manifest
 
 
 def check_private_baseline(result: dict) -> None:
@@ -110,6 +111,82 @@ def check_account_snapshot() -> None:
         commit_records(staged, data_dir=data_dir, expected_revision=revision)
 
 
+def check_append_only_corrections() -> None:
+    with tempfile.TemporaryDirectory(prefix="social-post-correction-") as raw:
+        root = Path(raw)
+        data_dir = root / "data"
+        bundle = sample_bundle("corrected")
+        bundle["post"]["content_type"] = "short_video"
+        bundle["snapshot"]["metrics"] = {"plays": 1200}
+        bundle["correction"] = {
+            "correction_id": "correction-duration-and-precision",
+            "target_type": "post",
+            "target_id": "post-corrected",
+            "recorded_at": "2026-08-13T12:00:00+08:00",
+            "changes": {"duration_seconds": 30},
+            "reason": "duration confirmed from source media",
+        }
+        staged, _, revision = prepare_records(bundle, data_dir)
+        validate_staged(staged)
+        commit_records(staged, data_dir=data_dir, expected_revision=revision)
+        result = validate_store(root)
+        if result["posts"][0].get("duration_seconds") != 30:
+            raise AssertionError("post correction was not materialized")
+        raw_post = json.loads((data_dir / "posts.jsonl").read_text(encoding="utf-8"))
+        if "duration_seconds" in raw_post:
+            raise AssertionError("correction mutated the original post event")
+
+        invalid = {"correction": {
+            "correction_id": "correction-illegal-identity",
+            "target_type": "post",
+            "target_id": "post-corrected",
+            "recorded_at": "2026-08-13T13:00:00+08:00",
+            "changes": {"post_id": "different"},
+            "reason": "negative control",
+        }}
+        rejected, _, _ = prepare_records(invalid, data_dir)
+        try:
+            validate_staged(rejected)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("identity-changing correction was accepted")
+
+
+def check_metric_qualifiers() -> None:
+    with tempfile.TemporaryDirectory(prefix="social-post-qualifier-") as raw:
+        root = Path(raw)
+        data_dir = root / "data"
+        bundle = sample_bundle("rounded")
+        bundle["snapshot"]["metrics"] = {"plays": 86000}
+        bundle["snapshot"]["metric_qualifiers"] = {"plays": "rounded"}
+        staged, _, revision = prepare_records(bundle, data_dir)
+        validate_staged(staged)
+        commit_records(staged, data_dir=data_dir, expected_revision=revision)
+        rows = series_summary(root)
+        if rows[0].get("plays_qualifier") != "rounded":
+            raise AssertionError("metric precision qualifier disappeared from summary")
+
+
+def check_public_sync_guard() -> None:
+    with tempfile.TemporaryDirectory(prefix="social-post-public-guard-") as raw:
+        root = Path(raw)
+        candidate = root / "candidate.md"
+        candidate.write_text("contains private-account marker", encoding="utf-8")
+        config = {"sync": {"privacy": {"tokens": ["private-account"], "patterns": []}}}
+        if not privacy_violations([(candidate, "candidate.md")], config):
+            raise AssertionError("public sync privacy token was not blocked")
+        try:
+            safe_destination(root, "../escape.txt")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("public sync accepted a path outside its root")
+        write_manifest(root, ["safe.md"])
+        if managed_paths(root) != {"safe.md"}:
+            raise AssertionError("public sync managed manifest did not round-trip")
+
+
 def main() -> int:
     result = validate_store()
     if not result["valid"]:
@@ -119,6 +196,9 @@ def main() -> int:
     check_archive_manifests()
     check_concurrent_writer()
     check_account_snapshot()
+    check_append_only_corrections()
+    check_metric_qualifiers()
+    check_public_sync_guard()
     print("self-test passed")
     return 0
 

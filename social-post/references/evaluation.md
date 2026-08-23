@@ -1,195 +1,27 @@
-# 貼文評估框架
+# Outcome evaluation
 
-本檔給 Phase 2 發完後評估表現用，也是使用者問「這篇好不好」時的判斷依據。
+## Order of analysis
 
-## 目錄
+1. Identity: same post, platform scope, content type and caption variant.
+2. Time: compare similar `hours_since_publish` and maturity.
+3. Distribution: plays／views, reach／viewers, non-follower share and traffic sources.
+4. Watch quality: average watch, percentage viewed, skip／swipe and retention shape.
+5. Conversion: follows／subscribers, profile actions, clicks or business outcome.
+6. Packaging: first frame, title, caption, language, duration and CTA.
 
-- FB 演算法訊號、benchmark、4 指標與 flop 紅線
-- 非追蹤比例、貼文類型與真 KPI
-- 排名、早期訊號、plateau 與 second push
-- IG Reel 評估口徑、AI 短劇三集基準與 caption 因果
+## Metric rules
 
-## 🧠 FB 2026 演算法訊號權重（v0.7.2 更新，2026-05 web 大數據驗證）
+- Keep platform labels verbatim; do not silently equate reach, viewers and unique viewers.
+- `null` means missing. Zero means the platform reported zero.
+- Treat `rounded`, `upper_bound` and `visual_estimate` as qualified observations, not exact inputs.
+- A combined Meta card is not an Instagram-only or Facebook-only result.
+- Derived rates must name numerator, denominator and scope.
 
-Meta 2024-11 推「Unconnected Distribution」指標（**佔 feed 50%**）。讚幾乎無權重，2026 演算法已從「friends activity」轉成「**AI-driven discovery engine**」主動推薦。
+## Evidence strength
 
-| 信號 | 權重 | 說明 |
-|---|---|---|
-| **私訊分享**（Messenger / WhatsApp） | **最高（"essential" 標籤）** | 🆕 立刻 trigger broader distribution |
-| **儲存（Save）** | **次高** | 「revisit 信號」= 內容值得回看 |
-| **5 字以上留言** | **3× 一般留言** | 「meaningful comment」深度對話信號 |
-| **公開分享（Story / Timeline）** | 高 | 「ultimate vote of confidence」|
-| **公開分享（普通）** | ~20× 讚 | v0.6 基礎權重 |
-| **一般留言**（短句、tag、emoji）| ~5× 讚 | v0.6 基礎權重 |
-| **Dwell time / 查看更多** | 中 | 第 1 小時權重最高 |
-| 讚 | ~0 | 絕對值無評估意義 |
+- `hypothesis`: plausible mechanism without a clean test.
+- `emerging`: repeated directional evidence with unresolved confounds.
+- `validated`: multiple independent tests inside a declared scope.
+- `deprecated`: contradicted, obsolete or unsafe to apply.
 
-**判斷順序（2026 最新）**：私訊分享 > 儲存 > 5 字長留言 > 公開分享 > 一般留言 > dwell > 讚
-
-**第 1 小時 = 80% viral potential**（[posteverywhere 2026 / Bluehost 2026 報告](https://posteverywhere.ai/blog/how-to-go-viral-on-facebook)）：發文後 60 分鐘內的早期互動決定演算法是否啟動 broader distribution。
-
-**Hao funnel implications**：
-- 之前 R7「真 KPI 是 Line 群」對應的「留言區拉群」CTA → 應加「分享給朋友」（私訊分享）混用
-- F19 mid-viral 的 4 個儲存，權重遠高於 v0.6 當時視為 minor 指標的認定
-- F6b 純血 hype hook 引發短留言（「+1」「拉我」）不是 5 字 + 長留言 → 演算法權重低
-
----
-
-## 📊 Benchmark 表（~4K 粉 FB 帳號，基於 Day 1 實戰校準）
-
-| 等級 | 瀏覽者 | 讚 | 留言 |
-|---|---|---|---|
-| ✅ 及格（日常）| 500-1,500 | 15-30 | 1-3 |
-| 📈 優秀 | 3,000-10,000 | 40-80 | 5-10 |
-| 🔥 爆款 | 20,000-50,000 | 100+ | 15+ |
-| 💥 mega-viral | 70,000+ | 300+ | 400+ |
-
-使用者跑自己的 skill 幾週後，用自己實戰資料替換此表。
-
----
-
-## 🎯 4 指標評估法（取代絕對讚數判斷）
-
-**不要看讚絕對數**。看這四個：
-
-1. **連結點擊率** > 1% = 鐵粉真的行動（點 GitHub / Line 等）
-2. **非追蹤者比例**：**> 50% = 已破鐵粉圈**（演算法廣推中）；**< 15% = 鎖鐵粉圈，下一篇必用破圈款**（R3）。⚠️ 這個門檻掛在**非追蹤者**比例，別跟追蹤者比例搞混
-3. **互動率**（互動 ÷ **瀏覽者**，分母別用瀏覽次數）：**這把尺只適用深化型**。> 15% = 優秀、> 25% = 異常好。⚠️ **擴散型不適用** —— Day 1 mega 同口徑只有約 1.3%，7/20 mega 4.67%；擴散型看非追蹤比例，深化型才看互動率（R6 兩把尺）
-4. **下游轉化**：GitHub star、Line 入群、訂閱等實際人數（真 KPI）
-
-**4/4 通過** = 成功（即使讚只有 15）。**全部踩下面紅線** = 真 flop。
-
----
-
-## ⚠️ 真 flop 紅線（必須全部符合）
-
-| 條件 | 門檻 |
-|---|---|
-| 讚 | < 10 |
-| 互動率 | < 5% |
-| 追蹤者比例 | < 30%（連鐵粉都不看）|
-| 連結點擊 | = 0 |
-
-**全符合才是真 flop**。單一低不代表 flop（如 Day 2 讚 23 但互動率 19.4%、連結點擊 2.35% = 其實很好）。
-
----
-
-## 📍 非追蹤者比例監控（突破鐵粉圈）
-
-| 非追蹤者比例 | 判讀 | 行動 |
-|---|---|---|
-| > 70% | 🔥 演算法廣推中 | 繼續同類內容 |
-| 40-70% | 📈 混合觸及 | 正常 |
-| 15-40% | 🟡 偏鐵粉 | 可接受 |
-| < 15% | ⚠️ **鎖鐵粉圈** | 下一篇必用 F8-F13（見 formulas.md Part 2）|
-
-連續 3 篇 < 15% 非追蹤者 = 演算法已歸類「鐵粉限定創作者」，必須強制擴散。
-
----
-
-## 🎭 2 種貼文類型框架（不用同標準比較）
-
-| 維度 | **擴散型**（Day 1 模式） | **深化型**（Day 2 模式） |
-|---|---|---|
-| 非追蹤者比例 | > 70% | < 40% |  ⚠️ 此列為**非追蹤者**比例，越高越好
-| 讚 | 高 | 低 |
-| 互動率 | 中 | **更高** |
-| 連結點擊率 | 極低（0.01%）| **極高（2%+）** |
-| 實際功能 | 大量路人觸及 | 鐵粉真的 star / fork / 入群 |
-| 公式範例 | F6b / F10 / F8 | F4 / F6b 續集 / F13 |
-
-**意義**：擴散型拉新粉、深化型轉化既有粉絲。兩種都是成功，只是功能不同。讚數不可互比。
-
----
-
-## 🏆 真 KPI：Line 社群 / GitHub star，不是讚
-
-Day 1 實證：448 讚只是表面，**+1,150 Line 社群成員**才是真 ROI。
-
-評估爆款「值不值得」時，問：
-- 帶了多少真實社群成員？
-- 帶了多少 GitHub star / fork？
-- 帶了多少工坊付費學員？
-- 帶了多少訂閱 / 追蹤者？
-
-如果這些 downstream 轉化**沒動**，再高的讚也只是數字。
-
----
-
-## 📝 排名指標（最近 10 篇相對表現）
-
-FB Insights 會顯示「這篇在最近 10 篇中排名第 N」。使用這個比絕對讚數有意義：
-
-- **排名 1-3**：表現突出，分析原因複製
-- **排名 4-6**：正常範圍
-- **排名 7-10**：underperform，檢討時段/公式/主題
-
-**原則**：用**排名**評估「這篇對你自己好不好」，用**絕對數**評估「這篇對外部世界強不強」。
-
----
-
-## ⏰ 早期信號 vs Plateau 判定（多次實證）
-
-**規則：1-19h 不下定論**。多次實證早期判斷會嚴重低估或誤判：
-
-| 貼文 | 1-19h 早期判讀 | 48-72h plateau 真實 |
-|---|---|---|
-| Day 1 | 看似 mega-viral | ✅ 確認 + Line 社群 +1,319 真 ROI |
-| Day 2 | 「flop」（讚 23）| ❌ 誤判 — 連結點擊率 2.35% 是 deep conversion 之王 |
-| Day 4 | 鐵粉限定 6% 非追蹤者 | ❌ 誤判 — second push 觸發後 29% 突破 |
-| Day 5 | 「fail」（19h 95 觀眾）| ❌ 誤判 — 4.6% 連結點擊率 + GitHub stars +8 |
-
-**判定時機規則**：
-
-| 時間點 | 能說的 | 不能說的 |
-|---|---|---|
-| 1-6h | 「初步觸及 X 人，趨勢 Y」 | 不下成功/失敗結論 |
-| 6-24h | 「目前 trajectory」+ 早期信號 table 對照 | 不下最終定論 |
-| **48-72h plateau** | **用 4 指標判定** | — |
-
-**早期 mega-viral 信號表**（7h 達到以下任 2 條 = high-confidence viral pace）：
-- 瀏覽者 > 1,000
-- 留言 > 20
-- 分享 > 5
-- 互動率 > 15%
-- 非追蹤者 > 50%
-
-實證：Day 6 7h 達到 4/5（觀眾 1,578 / 留言 26 / 分享 6 / 互動率 16.7% / 非追蹤者 57.1%）→ plateau 期內預期突破 Day 2-5 全部表現。
-
-**早期 deep conversion 信號表**（24h 達到以下 = 鐵粉深化文）：
-- 連結點擊率 > 1%
-- 追蹤者比例 > 60%
-- 互動率 > 18%
-- 留言/讚比 > 0.8
-
-實證：Day 2 全部達到 → 連結點擊率 2.35% 是 5 篇之王（隱藏的 GitHub funnel）。
-
----
-
-## 🔬 演算法 second push（2026-04-24 Day 4 實證）
-
-演算法在發文後 **24-48h 會根據早期留言 / 互動 trigger 第二波廣推**：
-
-**觸發條件**：
-- 留言累積快速（Day 4 投票 5 留言 1h 內）
-- 主題夠新鮮
-- 內容值得分享給非追蹤者圈
-
-**沒觸發**：
-- 主題重複（Day 2、Day 5 都沒觸發）
-- 演算法判 self-promo / 鐵粉服務
-
-**實證**：Day 4 1h 6% 非追蹤者 → 58h 變 29%（second push 把貼文重新拋給 1,000+ 陌生人）。
-
-**戰略**：發文後 **24-48h 內回留言、引發討論串** = 主動 trigger second push。Plateau 期評估時要把這個窗口考慮進去。
-
----
-
-## 📱 IG Reel 評估口徑
-
-1. 先跑 `scripts/social_data.py summary --series <series>`；最新數字只從 structured ledger 取得。
-2. 比較相近 maturity，依序看 watch quality、distribution、conversion、content／packaging。
-3. 平均觀看占片長、略過、首段與片尾曲線分開判讀；圖上沒有座標就只記形狀。
-4. UI rate 存 `rates_reported`，手算值存 derived；不覆蓋平台口徑。
-5. 連載要記 standalone premise、cliffhanger、下一集 CTA 與 episode return。Caption 長短與劇情／首幀同時改變時，不稱 A/B。
-6. 同系列多集不是獨立樣本；規則升級走 experiment revision 與 rule backlink。AI 短劇目前候選見 R43。
+Do not promote a rule because one post is large. State what changed together, what was held constant, and the next discriminating experiment.

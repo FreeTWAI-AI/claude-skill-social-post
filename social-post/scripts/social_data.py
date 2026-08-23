@@ -11,7 +11,8 @@ from typing import Any
 
 from social_store import load_jsonl, store_revision
 from social_validation import (
-    validate_account_snapshots, validate_experiments, validate_posts, validate_snapshots,
+    materialize_corrections, validate_account_snapshots, validate_experiments, validate_posts,
+    validate_snapshots,
 )
 
 
@@ -21,6 +22,7 @@ POSTS_FILE = DATA_DIR / "posts.jsonl"
 SNAPSHOTS_FILE = DATA_DIR / "insight_snapshots.jsonl"
 ACCOUNT_SNAPSHOTS_FILE = DATA_DIR / "account_snapshots.jsonl"
 EXPERIMENTS_FILE = DATA_DIR / "experiments.jsonl"
+CORRECTIONS_FILE = DATA_DIR / "corrections.jsonl"
 RULE_REGISTRY_FILE = DATA_DIR / "rule_registry.json"
 
 
@@ -44,8 +46,12 @@ def validate_store(root: Path = SKILL_ROOT) -> dict[str, Any]:
     snapshots = load_jsonl(data / SNAPSHOTS_FILE.name)
     account_snapshots = load_jsonl(data / ACCOUNT_SNAPSHOTS_FILE.name)
     experiments = load_jsonl(data / EXPERIMENTS_FILE.name)
+    corrections = load_jsonl(data / CORRECTIONS_FILE.name)
     errors: list[str] = []
     warnings: list[str] = []
+    posts, snapshots, account_snapshots = materialize_corrections(
+        posts, snapshots, account_snapshots, corrections, errors,
+    )
     posts_by_id = validate_posts(posts, errors, warnings)
     latest, latest_by_platform = validate_snapshots(
         snapshots, posts_by_id, errors, warnings,
@@ -63,9 +69,11 @@ def validate_store(root: Path = SKILL_ROOT) -> dict[str, Any]:
             "account_snapshots": len(account_snapshots),
             "experiment_events": len(experiments),
             "experiments": len(latest_experiments),
+            "corrections": len(corrections),
         },
         "errors": errors,
         "warnings": warnings,
+        "posts": posts,
         "latest_snapshots": latest,
         "latest_snapshots_by_platform": latest_by_platform,
         "latest_account_snapshots": latest_accounts,
@@ -102,6 +110,7 @@ def derived_row(post: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any
         "captured_at": snapshot.get("captured_at"),
         "hours_since_publish": snapshot.get("hours_since_publish"),
         "plays": plays,
+        "plays_qualifier": snapshot.get("metric_qualifiers", {}).get("plays", "exact") if plays is not None else None,
         "reach": reach,
         "audience_count": audience_count,
         "audience_count_type": audience_type,
@@ -123,7 +132,7 @@ def series_summary(root: Path, series_id: str | None = None) -> list[dict[str, A
     result = validate_store(root)
     if result["errors"]:
         raise ValueError("; ".join(result["errors"]))
-    posts = load_jsonl(root / "data" / POSTS_FILE.name)
+    posts = result["posts"]
     latest = result["latest_snapshots_by_platform"]
     rows = []
     for post in posts:
@@ -149,8 +158,11 @@ def render_table(rows: list[dict[str, Any]]) -> str:
     for row in rows:
         watch = "—" if row["watch_seconds"] is None else f"{row['watch_seconds']}s/{percent(row['watch_percent'])}"
         audience = "—" if row["audience_count"] is None else f"{row['audience_count']} ({row['audience_count_type']})"
+        plays = "—" if row["plays"] is None else str(row["plays"])
+        if row.get("plays_qualifier") not in (None, "exact"):
+            plays = f"{plays} ({row['plays_qualifier']})"
         values = (
-            str(row["episode"]), str(row["platform"]), str(row["plays"]), audience, watch,
+            str(row["episode"]), str(row["platform"]), plays, audience, watch,
             percent(row["skip_percent"]), percent(row["discovery_percent"]),
             percent(row["profile_source_percent"]), percent(row["followers_per_play_percent"]),
         )

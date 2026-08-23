@@ -16,6 +16,7 @@ from typing import Any, Iterator
 
 DATA_FILENAMES = (
     "posts.jsonl", "insight_snapshots.jsonl", "account_snapshots.jsonl", "experiments.jsonl",
+    "corrections.jsonl",
 )
 
 

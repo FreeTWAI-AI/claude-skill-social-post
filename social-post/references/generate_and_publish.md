@@ -6,13 +6,13 @@
 2. 從 `data/rule_registry.json` 找任務相關規則，只開必要的 `rules/RNN.md`。
 3. 從 formula index 找一個目標公式，只開該 formula 檔；不要讀完整公式庫。
 4. 草稿階段不讀平台 UI 流程。只有使用者確認要實際發布後，才讀目標平台 reference。
-5. 只有重新學 voice／深度仿寫時才讀完整 `style_profile.md` 或 `hao-voice`。
+5. 只有重新學 voice／深度仿寫時才讀完整 `style_profile.md` 或使用者明確指定的 voice Skill。
 
 ## 發文前三檢查
 
 - 用 structured latest snapshot 判斷前篇 maturity、是否仍成長、最近三篇陌生分發與題材／意圖冷卻；不要從 `content_plan.md` 讀舊績效。
 - 題材、素材、平台與「一稿同步」若已由使用者說明，直接採用，不重問。
-- 純 AI 短劇排除 YouTube；實拍 Shorts 可同步 YouTube。
+- 個人帳號／頻道的內容禁區只讀 `current_brief.md`；通用平台文件不可硬編使用者的私人政策。
 - 只有使用者要求實際操作發布才啟用瀏覽器；寫草稿不需要。
 
 ## 產稿

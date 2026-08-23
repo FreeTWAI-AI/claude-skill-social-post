@@ -34,7 +34,9 @@ def parse(text: str) -> tuple[str, list[tuple[int, str, str]]]:
 
 
 def index_text(prefix: str, rules: list[tuple[int, str, str]]) -> str:
-    output = [prefix.rstrip(), "", "---", "", "## R1-R42 navigation", "", "每條永久規則已拆成獨立檔案。只讀任務相關的 R，避免一次載入整本規則庫。", "", "| R | 標題 | 狀態 | 檔案 |", "|---:|---|---|---|"]
+    rule_ids = [rule_id for rule_id, _, _ in rules]
+    navigation = f"R{min(rule_ids)}-R{max(rule_ids)}"
+    output = [prefix.rstrip(), "", "---", "", f"## {navigation} navigation", "", "每條永久規則已拆成獨立檔案。只讀任務相關的 R，避免一次載入整本規則庫。", "", "| R | 標題 | 狀態 | 檔案 |", "|---:|---|---|---|"]
     for rule_id, title, _ in sorted(rules):
         if "廢除" in title or "撤回" in title:
             status = "deprecated"

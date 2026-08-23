@@ -1,0 +1,12 @@
+{
+  "correction": {
+    "correction_id": "demo-correct-duration-001",
+    "target_type": "post",
+    "target_id": "demo-series-ep01",
+    "recorded_at": "2026-08-13T09:00:00+08:00",
+    "changes": {
+      "duration_seconds": 91
+    },
+    "reason": "Source media inspection confirmed the exact duration."
+  }
+}

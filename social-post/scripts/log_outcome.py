@@ -11,10 +11,82 @@ from pathlib import Path
 from typing import Any
 
 from social_data import (
-    ACCOUNT_SNAPSHOTS_FILE, DATA_DIR, EXPERIMENTS_FILE, POSTS_FILE, SNAPSHOTS_FILE,
-    validate_store,
+    ACCOUNT_SNAPSHOTS_FILE, CORRECTIONS_FILE, DATA_DIR, EXPERIMENTS_FILE, POSTS_FILE,
+    SNAPSHOTS_FILE, validate_store,
 )
 from social_store import commit_records, load_jsonl, store_revision, write_jsonl
+
+
+def load_store_records(data_dir: Path) -> tuple[dict[str, Path], dict[str, list[dict[str, Any]]]]:
+    paths = {
+        "posts": data_dir / POSTS_FILE.name,
+        "snapshots": data_dir / SNAPSHOTS_FILE.name,
+        "account_snapshots": data_dir / ACCOUNT_SNAPSHOTS_FILE.name,
+        "experiments": data_dir / EXPERIMENTS_FILE.name,
+        "corrections": data_dir / CORRECTIONS_FILE.name,
+    }
+    return paths, {name: load_jsonl(path) for name, path in paths.items()}
+
+
+def append_snapshot(
+    post: dict[str, Any] | None,
+    snapshot: dict[str, Any] | None,
+    records: dict[str, list[dict[str, Any]]],
+) -> None:
+    if snapshot is None:
+        if post is not None:
+            raise ValueError("post cannot be supplied without a snapshot")
+        return
+    post_id = snapshot.get("post_id")
+    posts_by_id = {row.get("post_id"): row for row in records["posts"]}
+    existing_post = posts_by_id.get(post_id)
+    if existing_post is None:
+        if post is None:
+            raise ValueError("new post_id requires both post and snapshot")
+        if post.get("post_id") != post_id:
+            raise ValueError("snapshot.post_id must match post.post_id")
+        records["posts"].append(post)
+    elif post is not None and post != existing_post:
+        raise ValueError(
+            f"post_id already exists with different data: {post_id}; "
+            "omit post when appending a snapshot"
+        )
+    snapshot_id = snapshot.get("snapshot_id")
+    if snapshot_id in {row.get("snapshot_id") for row in records["snapshots"]}:
+        raise ValueError(f"duplicate snapshot_id: {snapshot_id}")
+    records["snapshots"].append(snapshot)
+
+
+def append_unique(
+    row: dict[str, Any] | None,
+    records: list[dict[str, Any]],
+    identity: str,
+) -> None:
+    if row is None:
+        return
+    value = row.get(identity)
+    if value in {existing.get(identity) for existing in records}:
+        raise ValueError(f"duplicate {identity}: {value}")
+    records.append(row)
+
+
+def append_experiment(
+    experiment: dict[str, Any] | None,
+    records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not experiment:
+        return experiment
+    normalized = dict(experiment)
+    experiment_id = normalized.get("experiment_id")
+    prior = [row for row in records if row.get("experiment_id") == experiment_id]
+    if prior:
+        next_revision = max(int(row.get("revision", 1)) for row in prior) + 1
+        normalized.setdefault("revision", next_revision)
+        normalized.setdefault("supersedes_revision", next_revision - 1)
+    else:
+        normalized.setdefault("revision", 1)
+    records.append(normalized)
+    return normalized
 
 
 def prepare_records(
@@ -25,57 +97,17 @@ def prepare_records(
     snapshot = bundle.get("snapshot")
     account_snapshot = bundle.get("account_snapshot")
     experiment = bundle.get("experiment")
-    if snapshot is None and account_snapshot is None and experiment is None:
-        raise ValueError("bundle requires a post snapshot, account snapshot, experiment, or a combination")
+    correction = bundle.get("correction")
+    if snapshot is None and account_snapshot is None and experiment is None and correction is None:
+        raise ValueError(
+            "bundle requires a post snapshot, account snapshot, experiment, correction, or a combination"
+        )
 
-    posts_file = data_dir / POSTS_FILE.name
-    snapshots_file = data_dir / SNAPSHOTS_FILE.name
-    account_snapshots_file = data_dir / ACCOUNT_SNAPSHOTS_FILE.name
-    experiments_file = data_dir / EXPERIMENTS_FILE.name
-    posts = load_jsonl(posts_file)
-    snapshots = load_jsonl(snapshots_file)
-    account_snapshots = load_jsonl(account_snapshots_file)
-    experiments = load_jsonl(experiments_file)
-    posts_by_id = {row.get("post_id"): row for row in posts}
-    snapshot_ids = {row.get("snapshot_id") for row in snapshots}
-
-    if snapshot is not None:
-        post_id = snapshot.get("post_id")
-        existing_post = posts_by_id.get(post_id)
-        if existing_post is None:
-            if post is None:
-                raise ValueError("new post_id requires both post and snapshot")
-            if post.get("post_id") != post_id:
-                raise ValueError("snapshot.post_id must match post.post_id")
-            posts.append(post)
-        elif post is not None and post != existing_post:
-            raise ValueError(f"post_id already exists with different data: {post_id}; omit post when appending a snapshot")
-
-        snapshot_id = snapshot.get("snapshot_id")
-        if snapshot_id in snapshot_ids:
-            raise ValueError(f"duplicate snapshot_id: {snapshot_id}")
-        snapshots.append(snapshot)
-    elif post is not None:
-        raise ValueError("post cannot be supplied without a snapshot")
-
-    if account_snapshot is not None:
-        account_snapshot_id = account_snapshot.get("account_snapshot_id")
-        known_ids = {row.get("account_snapshot_id") for row in account_snapshots}
-        if account_snapshot_id in known_ids:
-            raise ValueError(f"duplicate account_snapshot_id: {account_snapshot_id}")
-        account_snapshots.append(account_snapshot)
-
-    if experiment:
-        experiment_id = experiment.get("experiment_id")
-        prior = [row for row in experiments if row.get("experiment_id") == experiment_id]
-        experiment = dict(experiment)
-        if prior:
-            next_revision = max(int(row.get("revision", 1)) for row in prior) + 1
-            experiment.setdefault("revision", next_revision)
-            experiment.setdefault("supersedes_revision", next_revision - 1)
-        else:
-            experiment.setdefault("revision", 1)
-        experiments.append(experiment)
+    paths, records = load_store_records(data_dir)
+    append_snapshot(post, snapshot, records)
+    append_unique(account_snapshot, records["account_snapshots"], "account_snapshot_id")
+    experiment = append_experiment(experiment, records["experiments"])
+    append_unique(correction, records["corrections"], "correction_id")
 
     normalized: dict[str, Any] = {}
     if snapshot is not None:
@@ -86,12 +118,9 @@ def prepare_records(
         normalized["post"] = post
     if experiment is not None:
         normalized["experiment"] = experiment
-    return {
-        posts_file: posts,
-        snapshots_file: snapshots,
-        account_snapshots_file: account_snapshots,
-        experiments_file: experiments,
-    }, normalized, base_revision
+    if correction is not None:
+        normalized["correction"] = correction
+    return {paths[name]: rows for name, rows in records.items()}, normalized, base_revision
 
 
 def validate_staged(records: dict[Path, list[dict[str, Any]]]) -> None:
