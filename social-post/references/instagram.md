@@ -17,3 +17,9 @@
 ## Measurement
 
 Separate views／plays, reached accounts, average watch, skip, traffic sources, profile actions and follows. Preserve whether the UI value is rounded.
+
+## P5 Chrome comment replies
+
+- Follow `comment-operations.md`; open the exact post／Reel permalink and expand the full reply thread.
+- A truncated body, translated-only body or weak UI fingerprint may be drafted but cannot use bounded auto.
+- Verify the exact account, nesting level and reply text before recording `sent_verified`.

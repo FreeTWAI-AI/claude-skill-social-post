@@ -8,10 +8,11 @@ import tempfile
 from pathlib import Path
 
 from build_rule_registry import build
+from comment_self_test import run_comment_self_tests
 from log_outcome import prepare_records, validate_staged
 from social_data import SKILL_ROOT, series_summary, validate_store
 from social_store import commit_records
-from sync_public import managed_paths, privacy_violations, safe_destination, write_manifest
+from sync_public import candidates, managed_paths, privacy_violations, safe_destination, write_manifest
 
 
 def check_private_baseline(result: dict) -> None:
@@ -185,6 +186,29 @@ def check_public_sync_guard() -> None:
         write_manifest(root, ["safe.md"])
         if managed_paths(root) != {"safe.md"}:
             raise AssertionError("public sync managed manifest did not round-trip")
+        (root / "safe.md").write_text("public", encoding="utf-8")
+        (root / "private.jsonl").write_text('{"author":"private"}\n', encoding="utf-8")
+        fixture_ignore = ["candidate.md", ".social-post-managed.json"]
+        allowlist = {
+            "sync": {"include": ["safe.md"], "ignore": [*fixture_ignore, "private.jsonl"]},
+            "exclude": [],
+        }
+        if [relative for _path, relative in candidates(allowlist, root)] != ["safe.md"]:
+            raise AssertionError("public sync copied a file outside the closed-world allowlist")
+        try:
+            candidates({
+                "sync": {"include": ["safe.md"], "ignore": fixture_ignore}, "exclude": [],
+            }, root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("public sync silently accepted an unclassified private file")
+        try:
+            candidates({"sync": {"ignore": []}}, root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("public sync accepted a missing include allowlist")
 
 
 def main() -> int:
@@ -199,6 +223,7 @@ def main() -> int:
     check_append_only_corrections()
     check_metric_qualifiers()
     check_public_sync_guard()
+    run_comment_self_tests()
     print("self-test passed")
     return 0
 

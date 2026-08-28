@@ -22,18 +22,29 @@
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py"], "may_depend_on": []},
-      {"name": "storage", "patterns": ["social-post/scripts/social_store.py"], "may_depend_on": []},
-      {"name": "application", "patterns": ["social-post/scripts/social_data.py"], "may_depend_on": ["domain", "storage"]},
-      {"name": "cli", "patterns": ["social-post/scripts/log_outcome.py"], "may_depend_on": ["application", "storage"]},
-      {"name": "test", "patterns": ["social-post/scripts/self_test.py"], "may_depend_on": ["application", "storage", "cli", "tools"]},
+      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py", "social-post/scripts/comment_identity.py", "social-post/scripts/comment_authorization.py", "social-post/scripts/comment_domain.py", "social-post/scripts/comment_policy.py"], "may_depend_on": []},
+      {"name": "storage", "patterns": ["social-post/scripts/social_store.py", "social-post/scripts/comment_store.py"], "may_depend_on": []},
+      {"name": "application", "patterns": ["social-post/scripts/social_data.py", "social-post/scripts/comment_state.py"], "may_depend_on": ["domain", "storage"]},
+      {"name": "cli", "patterns": ["social-post/scripts/log_outcome.py", "social-post/scripts/comment_assistant.py", "social-post/scripts/comment_cli_support.py"], "may_depend_on": ["application", "domain", "storage"]},
+      {"name": "test", "patterns": ["social-post/scripts/self_test.py", "social-post/scripts/comment_self_test.py", "social-post/scripts/comment_test_*.py"], "may_depend_on": ["application", "domain", "storage", "cli", "tools"]},
       {"name": "tools", "patterns": ["social-post/scripts/build_rule_registry.py", "social-post/scripts/split_*.py"], "may_depend_on": []}
     ],
     "required_dependencies": [
       {"source": "social-post/scripts/log_outcome.py", "target": "social-post/scripts/social_store.py"},
       {"source": "social-post/scripts/log_outcome.py", "target": "social-post/scripts/social_data.py"},
       {"source": "social-post/scripts/social_data.py", "target": "social-post/scripts/social_validation.py"},
-      {"source": "social-post/scripts/social_data.py", "target": "social-post/scripts/social_store.py"}
+      {"source": "social-post/scripts/social_data.py", "target": "social-post/scripts/social_store.py"},
+      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_domain.py"},
+      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_policy.py"},
+      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_cli_support.py"},
+      {"source": "social-post/scripts/comment_cli_support.py", "target": "social-post/scripts/comment_state.py"},
+      {"source": "social-post/scripts/comment_cli_support.py", "target": "social-post/scripts/comment_store.py"},
+      {"source": "social-post/scripts/comment_domain.py", "target": "social-post/scripts/comment_authorization.py"},
+      {"source": "social-post/scripts/comment_domain.py", "target": "social-post/scripts/comment_identity.py"},
+      {"source": "social-post/scripts/comment_authorization.py", "target": "social-post/scripts/comment_identity.py"},
+      {"source": "social-post/scripts/comment_state.py", "target": "social-post/scripts/comment_domain.py"},
+      {"source": "social-post/scripts/comment_state.py", "target": "social-post/scripts/comment_policy.py"},
+      {"source": "social-post/scripts/comment_store.py", "target": "social-post/scripts/social_store.py"}
     ]
   }
 }

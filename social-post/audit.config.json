@@ -26,18 +26,29 @@
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["scripts/social_validation.py"], "may_depend_on": []},
-      {"name": "storage", "patterns": ["scripts/social_store.py"], "may_depend_on": []},
-      {"name": "application", "patterns": ["scripts/social_data.py"], "may_depend_on": ["domain", "storage"]},
-      {"name": "cli", "patterns": ["scripts/log_outcome.py"], "may_depend_on": ["application", "storage"]},
-      {"name": "test", "patterns": ["scripts/self_test.py"], "may_depend_on": ["application", "storage", "cli", "tools"]},
+      {"name": "domain", "patterns": ["scripts/social_validation.py", "scripts/comment_identity.py", "scripts/comment_authorization.py", "scripts/comment_domain.py", "scripts/comment_policy.py"], "may_depend_on": []},
+      {"name": "storage", "patterns": ["scripts/social_store.py", "scripts/comment_store.py"], "may_depend_on": []},
+      {"name": "application", "patterns": ["scripts/social_data.py", "scripts/comment_state.py"], "may_depend_on": ["domain", "storage"]},
+      {"name": "cli", "patterns": ["scripts/log_outcome.py", "scripts/comment_assistant.py", "scripts/comment_cli_support.py"], "may_depend_on": ["application", "domain", "storage"]},
+      {"name": "test", "patterns": ["scripts/self_test.py", "scripts/comment_self_test.py", "scripts/comment_test_*.py"], "may_depend_on": ["application", "domain", "storage", "cli", "tools"]},
       {"name": "tools", "patterns": ["scripts/build_rule_registry.py", "scripts/split_*.py"], "may_depend_on": []}
     ],
     "required_dependencies": [
       {"source": "scripts/log_outcome.py", "target": "scripts/social_store.py"},
       {"source": "scripts/log_outcome.py", "target": "scripts/social_data.py"},
       {"source": "scripts/social_data.py", "target": "scripts/social_validation.py"},
-      {"source": "scripts/social_data.py", "target": "scripts/social_store.py"}
+      {"source": "scripts/social_data.py", "target": "scripts/social_store.py"},
+      {"source": "scripts/comment_assistant.py", "target": "scripts/comment_domain.py"},
+      {"source": "scripts/comment_assistant.py", "target": "scripts/comment_policy.py"},
+      {"source": "scripts/comment_assistant.py", "target": "scripts/comment_cli_support.py"},
+      {"source": "scripts/comment_cli_support.py", "target": "scripts/comment_state.py"},
+      {"source": "scripts/comment_cli_support.py", "target": "scripts/comment_store.py"},
+      {"source": "scripts/comment_domain.py", "target": "scripts/comment_authorization.py"},
+      {"source": "scripts/comment_domain.py", "target": "scripts/comment_identity.py"},
+      {"source": "scripts/comment_authorization.py", "target": "scripts/comment_identity.py"},
+      {"source": "scripts/comment_state.py", "target": "scripts/comment_domain.py"},
+      {"source": "scripts/comment_state.py", "target": "scripts/comment_policy.py"},
+      {"source": "scripts/comment_store.py", "target": "scripts/social_store.py"}
     ]
   }
 }

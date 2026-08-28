@@ -1,15 +1,16 @@
 # social-post skill
 
-一個可安裝到 Codex 或 Claude Code 的社群內容 Skill：學習本機聲線、規劃內容、撰寫平台化貼文、經確認後發布，並把跨平台洞察保存成可驗證的結構化資料。
+一個可安裝到 Codex 或 Claude Code 的社群內容 Skill：學習本機聲線、規劃內容、撰寫平台化貼文、經確認後發布，以已登入 Chrome 受控管理 FB／IG／Threads 留言，並把跨平台洞察保存成可驗證的結構化資料。
 
-目前版本：**v2.2.0**。
+目前版本：**v2.3.0**。
 
-## v2.2.0
+## v2.3.0
 
-- 新增 append-only `corrections.jsonl`：修正發布時間、片長或舊快照時，不再覆寫歷史 event。
-- 新增 `metric_qualifiers`：`rounded`、`upper_bound`、`visual_estimate` 等平台顯示精度會一路保留到 summary。
-- Public sync 在寫入前做 privacy preflight，並用 managed manifest 追蹤可安全同步的通用檔案。
-- 公開包改為「通用引擎＋虛構案例＋匿名規則／公式」；真實帳號案例、數據、聲線與私人平台決策不再出現在目前發布樹。
+- 新增 P5 Comment Ops：零 API、使用既有 Chrome 登入狀態，支援掃描、草擬、批次確認與低風險 bounded auto。
+- 留言 observation 與 reply audit 採 append-only ledger，內建去重、stale draft、一次性 permit、送出前紀錄與不明結果對帳。
+- bounded auto 必須先建立有期限、指定平台／帳號／貼文且有總次數上限的 session grant；換 session、換 scope、撤銷或達上限即失效。
+- 公開同步改為 closed-world allowlist；任何未明確列名的新檔預設不公開。
+- 真實留言、帳號、貼文 ID、Cookie、session、token、截圖與私人數據不進公開 repo。
 
 ## 安裝
 
@@ -36,7 +37,7 @@ Copy-Item content_plan.example.md content_plan.md
 
 再把 `voice_quick.md` 與 `current_brief.md` 的 placeholder 換成自己的方向。
 
-## 五個 Mode
+## 六個 Mode
 
 | Mode | 用途 |
 |---|---|
@@ -45,6 +46,20 @@ Copy-Item content_plan.example.md content_plan.md
 | P2 Draft／Publish | 撰稿；當輪確認後才發布 |
 | P3 Log Outcome | 保存貼文、快照、帳號總覽與 corrections |
 | P4 Optimize Patterns | 對齊 maturity 後做跨篇／跨平台比較 |
+| P5 Comment Ops | 以 Chrome 受控掃描、草擬、核准及回覆留言 |
+
+## Comment Ops 快速開始
+
+P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供無邊界的全自動模式。實際掃描與送出需要執行環境提供 `chrome:control-chrome` 及已連線的 Chrome；沒有瀏覽器控制能力時仍可使用草稿、政策、ledger 與測試功能。
+
+```powershell
+$env:PYTHONUTF8='1'
+python scripts/comment_assistant.py validate
+python scripts/comment_assistant.py queue --format json
+python scripts/comment_self_test.py
+```
+
+實際流程與停損條件見 [`comment-operations.md`](social-post/references/comment-operations.md)。所有 ledger command 預設 dry-run，明確加上 `--write` 才會寫入本機。
 
 ## Outcome 快速開始
 
@@ -64,7 +79,9 @@ python scripts/social_data.py summary --series demo-series
 
 - `style_profile.md`、`content_plan.md`、`drafts/`；
 - `data/*.jsonl` 的真實 outcome／correction；
+- `comment_events.jsonl`、`reply_events.jsonl` 的真實留言、作者、貼文與回覆；
 - 原始洞察截圖、caption archive、帳號名稱、個人路徑；
+- Cookie、session、access token、瀏覽器 profile、登入資料；
 - 從私人數據升級出的規則、公式或案例。
 
 ## 驗證
@@ -72,6 +89,7 @@ python scripts/social_data.py summary --series demo-series
 ```powershell
 python social-post/scripts/self_test.py
 python social-post/scripts/social_data.py validate
+python social-post/scripts/comment_assistant.py validate
 ```
 
 ## License

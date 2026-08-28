@@ -18,3 +18,9 @@
 ## Measurement
 
 Keep Facebook-only metrics separate from Meta combined cards. Report reaction, comment, share and click scopes exactly as displayed.
+
+## P5 Chrome comment replies
+
+- Follow `comment-operations.md`; enter through the exact post permalink and verify the active identity.
+- Treat Enter as a possible send action. Persist `send_started` before it, and keep the approved reply on one line.
+- Mark `sent_verified` only after the exact reply is visible under the intended comment; otherwise stop in `needs_reconcile`.

@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.3.0 — 2026-08-28
+
+### Added
+
+- P5 Chrome Comment Ops for Facebook, Instagram and Threads without Meta API integration.
+- Append-only comment observations and reply audit state machine.
+- Strong／weak comment identity, stale-draft detection, bounded-auto policy and repeated-reply gate.
+- One-shot permits scoped to session, platform, account, post, comment and exact reply hash.
+- Append-only bounded-auto session grants with exact scope, expiry, revocation and a cumulative action cap.
+- `send_started → sent_verified／needs_reconcile` recovery so uncertain browser outcomes are never blindly retried.
+- Behavioral tests for cross-platform identity, authorization, idempotency, uncertain sends, optimistic concurrency and dry-run writes.
+
+### Changed
+
+- Public sync is now a closed-world allowlist: new private files are excluded unless explicitly approved.
+- Live comment actions use current-session authorization and a finite run cap; private messages and media replies remain out of scope.
+
+### Privacy
+
+- Real comments, replies, authors, post IDs, browser sessions, cookies, tokens, screenshots and local account data are excluded from the public package.
+
 ## v2.2.0 — 2026-08-24
 
 ### Added

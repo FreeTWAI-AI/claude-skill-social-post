@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "default_mode": "batch_confirm",
+  "auto_classifications": [
+    "positive_reaction",
+    "gratitude",
+    "emoji_only"
+  ],
+  "review_required_classifications": [
+    "question",
+    "keyword_request",
+    "complaint",
+    "support",
+    "pricing",
+    "partnership",
+    "legal",
+    "security",
+    "privacy",
+    "harassment",
+    "sensitive",
+    "spam",
+    "unknown"
+  ],
+  "minimum_auto_confidence": 0.95,
+  "maximum_actions_per_run": 5,
+  "maximum_reply_characters": 500,
+  "allow_external_links_auto": false,
+  "allow_private_messages": false,
+  "allow_media_replies": false
+}

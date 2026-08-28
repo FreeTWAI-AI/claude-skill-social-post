@@ -1,6 +1,6 @@
 ---
 name: social-post
-description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語氣與受眾，規劃內容、撰寫平台化貼文、經確認後發佈；並作為所有流量、演算法、留存與轉化學習的唯一結構化帳本，做跨平台／跨篇／跨集比較、實驗設計及規則升降級。使用者說「發文」「幫我寫」「用我的口氣」「排貼文」「查流量」「演算法」「分析 Reels／Shorts」「把數據訓練進去」「記錄成效」「比較這幾篇」「優化 pattern」「review」時使用。
+description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語氣與受眾，規劃、撰寫、確認後發佈內容；以已登入 Chrome 受控掃描、草擬及回覆 FB／IG／Threads 留言；並作為流量、留存與轉化的結構化帳本。使用者說「發文」「用我的口氣」「回覆留言」「自動回留言」「掃留言」「查流量」「演算法」「把數據訓練進去」「比較貼文」「優化 pattern」時使用。
 ---
 
 # Social Post
@@ -20,6 +20,7 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 | 寫一篇、PO、發文 | P2 Draft／Publish | `references/generate_and_publish.md`＋`voice_quick.md`＋`current_brief.md`＋單一 formula；確認後才讀平台 ref |
 | 把數據訓練進來、記錄成效 | P3 Log Outcome | `references/outcome-workflow.md`＋`data/*.jsonl` |
 | 比較貼文／集數、找 pattern | P4 Optimize Patterns | `references/outcome-workflow.md`＋`references/evaluation.md`＋相關 rules |
+| 掃描、草擬、回覆 FB／IG／Threads 留言 | P5 Comment Ops | `references/comment-operations.md`＋`references/comment-policy.json`＋目標平台 ref＋`voice_quick.md` |
 | 查歷史 Case | Legacy Case | `references/case_studies.md` 索引，再讀單一 `references/cases/case-NN.md` |
 
 路由前用一句話告知正在做哪個 Mode。單純診斷不需要 Chrome。
@@ -37,6 +38,9 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 | 規則生命週期／實驗 backlink | `references/rules/metadata.json` |
 | 規則機器索引 | `data/rule_registry.json`（生成檔） |
 | 舊案例全文 | `references/cases/` |
+| Chrome 可見留言 observation | `data/comment_events.jsonl`；私人 append-only ledger |
+| 回覆草稿／permit／送出／對帳 | `data/reply_events.jsonl`；私人 append-only ledger |
+| 留言自動化政策 | `references/comment-policy.json` |
 
 新成效不得只寫進 Markdown。先寫 JSONL，再視需要更新人類摘要。
 
@@ -63,13 +67,16 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 
 證據狀態只用：`hypothesis → emerging → validated → deprecated`。同一系列三集是 n=3 posts，但不是三個獨立樣本。實驗可用同一 `experiment_id` 追加 revision；不可覆寫歷史。候選規則必須同時在 experiment `rule_ids` 與 rule metadata `experiment_ids` 建 backlink。
 
-## 實際發佈安全閘
+## 實際發佈與留言安全閘
 
-只有 P2 的實際發布需要 `chrome:control-chrome` 與已登入狀態；草稿、規劃、分析、資料回填不需要。
+只有 P2 的實際發布與 P5 的實際掃描／回覆需要 `chrome:control-chrome` 與已登入狀態；草稿、規劃、分析、資料回填與 P5 ledger 操作不需要。
 
 - 發佈前必須在當前對話取得明確「確認」。
 - 使用者若在當前 session 明示「你自己操作不用問」，私人版可免逐次確認；不跨 session。
 - 不幫登入、不改帳號／隱私、不刪文、不自動按讚／follow／大量留言。
+- P5 預設 `batch_confirm`；`bounded_auto` 只在當前 session 明示平台、帳號、貼文與本輪範圍後，以有期限、指定 scope、有限次數的 ledger grant 啟用。每則回覆都要一次性 permit、送出前 audit、送出後畫面驗證；分批執行不得重置 grant 上限。
+- 送出結果不明時標記 `needs_reconcile` 並停止整批；未重新讀取畫面前不得重送。零 API Chrome 模式不宣稱 24/7 背景監聽。
+- P5 不處理私訊、媒體／GIF 回覆或全帳號歷史爬取；大量 keyword 索取改用單一公開作者留言提供自助入口。
 - 預設跨平台重新包裝；但使用者明示「同步發布／一稿多發」時，正文共用一份，只有平台必填欄位沿用正文內容（例如 YouTube 標題取第一句），不再額外維護多套文案。
 - FB／Threads 正文不放外部連結；依 R25 使用留言或平台允許的位置。
 - 沒有 IG 圖／影片就停，讓使用者選擇提供素材、跳過 IG 或改 Threads。
@@ -92,5 +99,7 @@ $env:PYTHONUTF8='1'
 python scripts/social_data.py validate
 python scripts/social_data.py summary --series <series-id>
 python scripts/build_rule_registry.py --write
+python scripts/comment_assistant.py validate
+python scripts/comment_self_test.py
 python ../code-cleanup-helper/scripts/audit.py . --mode all
 ```

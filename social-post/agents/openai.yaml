@@ -1,4 +1,4 @@
 interface:
   display_name: "Social Post"
-  short_description: "Draft, publish, and learn from social performance data"
-  default_prompt: "Use $social-post to draft platform-specific content or log and compare its performance data."
+  short_description: "Draft, publish, reply to comments, and learn from results"
+  default_prompt: "Use $social-post to draft or publish a post, manage a bounded comment-reply run, or learn from performance data."

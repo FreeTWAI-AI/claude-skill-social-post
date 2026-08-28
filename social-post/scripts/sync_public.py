@@ -29,17 +29,30 @@ def ignored(relative: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(normalized, pattern) for pattern in patterns)
 
 
-def candidates(config: dict) -> list[tuple[Path, str]]:
+def candidates(config: dict, root: Path = ROOT) -> list[tuple[Path, str]]:
+    included = config.get("sync", {}).get("include")
+    if not isinstance(included, list) or not included or any(not isinstance(item, str) for item in included):
+        raise ValueError("sync.include must be a non-empty list of path patterns")
     excluded = config.get("exclude", [])
     sync_ignored = config.get("sync", {}).get("ignore", [])
     rows = []
-    for path in ROOT.rglob("*"):
+    unclassified = []
+    for path in root.rglob("*"):
         if not path.is_file():
             continue
-        relative = path.relative_to(ROOT).as_posix()
+        relative = path.relative_to(root).as_posix()
         if ignored(relative, excluded) or ignored(relative, sync_ignored):
             continue
-        rows.append((path, relative))
+        if ignored(relative, included):
+            rows.append((path, relative))
+        else:
+            unclassified.append(relative)
+    if unclassified:
+        preview = ", ".join(sorted(unclassified)[:10])
+        suffix = " ..." if len(unclassified) > 10 else ""
+        raise ValueError(
+            "sync source files must be explicitly included or ignored: " + preview + suffix
+        )
     return sorted(rows, key=lambda row: row[1])
 
 
