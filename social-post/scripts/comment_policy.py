@@ -32,6 +32,32 @@ def validate_policy(policy: dict[str, Any], errors: list[str]) -> None:
     maximum = policy.get("maximum_actions_per_run")
     if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1:
         errors.append("comment policy maximum_actions_per_run must be a positive integer")
+    scan_maximum = policy.get("maximum_comments_per_scan", 100)
+    if not isinstance(scan_maximum, int) or isinstance(scan_maximum, bool) or scan_maximum < 1:
+        errors.append("comment policy maximum_comments_per_scan must be a positive integer")
+    scan_age = policy.get("maximum_browser_scan_age_seconds", 300)
+    if not isinstance(scan_age, int) or isinstance(scan_age, bool) or scan_age < 1:
+        errors.append(
+            "comment policy maximum_browser_scan_age_seconds must be a positive integer"
+        )
+    preflight_maximum = policy.get("maximum_browser_preflight_age_seconds", 60)
+    if (
+        not isinstance(preflight_maximum, int)
+        or isinstance(preflight_maximum, bool)
+        or preflight_maximum < 1
+    ):
+        errors.append(
+            "comment policy maximum_browser_preflight_age_seconds must be a positive integer"
+        )
+    result_maximum = policy.get("maximum_browser_result_age_seconds", 300)
+    if (
+        not isinstance(result_maximum, int)
+        or isinstance(result_maximum, bool)
+        or result_maximum < 1
+    ):
+        errors.append(
+            "comment policy maximum_browser_result_age_seconds must be a positive integer"
+        )
     max_chars = policy.get("maximum_reply_characters")
     if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 1:
         errors.append("comment policy maximum_reply_characters must be a positive integer")

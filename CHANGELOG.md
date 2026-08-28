@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.4.0 — 2026-08-28
+
+### Added
+
+- Executable structured Chrome bridge commands: `browser-scan-request`, `browser-scan`, `browser-action`, `browser-begin`, `browser-finish` and `browser-reconcile`.
+- Append-only, expiring scan-target requests that bind live observations to an independently selected session, account and post.
+- Strict action／preflight／receipt binding across permit, session, scope, comment fingerprint and exact reply hash.
+- Freshness, integer schema, exact post path／query, composer readback and post-submit causality guards.
+- Facebook, Instagram and Threads local HTML contract fixtures plus state-derived fill／click receipts, verified, ambiguous, stale, wrong-parent, wrong-type and reconciliation journeys.
+- Credential-shaped public-sync negative controls and explicit browser evidence／trace privacy exclusions.
+
+### Changed
+
+- Active skill ledgers reject raw begin／finish／reconcile commands that bypass the Chrome bridge; those commands remain available only for isolated fixture ledgers.
+- A contradictory or partially verified submit can no longer become `sent_verified`; it remains `needs_reconcile` and cannot be blindly retried.
+- Reinspection now uses a structured receipt. Uncertain reinspection performs no ledger mutation.
+- Preflight evidence must occur after approval and before permit expiry; a failed outcome cannot contradict visible own-reply evidence.
+
+### Boundary
+
+- The bridge prevents accidental stale, cross-post and duplicate actions, but browser observations remain trusted assertions from the current bound Codex Chrome session rather than cryptographic DOM attestation.
+
 ## v2.3.0 — 2026-08-28
 
 ### Added

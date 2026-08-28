@@ -21,15 +21,22 @@
     "CASE": ["references/case_studies.md"]
   },
   "sync": {"public_root": null, "ignore": []},
-  "privacy": {"tokens": [], "patterns": ["C:[/\\\\]Users[/\\\\]"]},
+  "privacy": {"tokens": [], "patterns": [
+    "C:[/\\\\]Users[/\\\\]",
+    "(?i)Authorization\\s*:\\s*Bearer\\s+[A-Za-z0-9._~-]{8,}",
+    "(?i)Cookie\\s*:\\s*[^;\\r\\n]{8,}",
+    "(?i)Chrome[/\\\\]User Data[/\\\\](Default|Profile [0-9]+)",
+    "(?i)(access[_-]?token|session[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password)\\s*[:=]\\s*[\\\"'][^\\\"']{8,}[\\\"']",
+    "\\.(har|trace)$"
+  ]},
   "architecture": {
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["scripts/social_validation.py", "scripts/comment_identity.py", "scripts/comment_authorization.py", "scripts/comment_domain.py", "scripts/comment_policy.py"], "may_depend_on": []},
+      {"name": "domain", "patterns": ["scripts/social_validation.py", "scripts/comment_identity.py", "scripts/comment_authorization.py", "scripts/comment_domain.py", "scripts/comment_policy.py", "scripts/comment_browser_contract.py"], "may_depend_on": []},
       {"name": "storage", "patterns": ["scripts/social_store.py", "scripts/comment_store.py"], "may_depend_on": []},
       {"name": "application", "patterns": ["scripts/social_data.py", "scripts/comment_state.py"], "may_depend_on": ["domain", "storage"]},
-      {"name": "cli", "patterns": ["scripts/log_outcome.py", "scripts/comment_assistant.py", "scripts/comment_cli_support.py"], "may_depend_on": ["application", "domain", "storage"]},
+      {"name": "cli", "patterns": ["scripts/log_outcome.py", "scripts/comment_assistant.py", "scripts/comment_cli_support.py", "scripts/comment_browser_cli.py"], "may_depend_on": ["application", "domain", "storage"]},
       {"name": "test", "patterns": ["scripts/self_test.py", "scripts/comment_self_test.py", "scripts/comment_test_*.py"], "may_depend_on": ["application", "domain", "storage", "cli", "tools"]},
       {"name": "tools", "patterns": ["scripts/build_rule_registry.py", "scripts/split_*.py"], "may_depend_on": []}
     ],
@@ -41,6 +48,8 @@
       {"source": "scripts/comment_assistant.py", "target": "scripts/comment_domain.py"},
       {"source": "scripts/comment_assistant.py", "target": "scripts/comment_policy.py"},
       {"source": "scripts/comment_assistant.py", "target": "scripts/comment_cli_support.py"},
+      {"source": "scripts/comment_assistant.py", "target": "scripts/comment_browser_cli.py"},
+      {"source": "scripts/comment_browser_cli.py", "target": "scripts/comment_browser_contract.py"},
       {"source": "scripts/comment_cli_support.py", "target": "scripts/comment_state.py"},
       {"source": "scripts/comment_cli_support.py", "target": "scripts/comment_store.py"},
       {"source": "scripts/comment_domain.py", "target": "scripts/comment_authorization.py"},

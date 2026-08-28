@@ -80,4 +80,5 @@ python scripts/self_test.py
 - `invalid published_at`：時間需使用 ISO 8601 並包含 offset，例如 `2026-08-11T19:49:00+08:00`。
 - `unknown post_id`：首次寫入需要 `post`＋`snapshot`；追加快照才可省略 `post`。
 - 發到錯帳號風險：發布前截圖或讀取 compose 畫面，讓使用者確認帳號。
-- 平台 UI 改版：只更新對應的 `references/facebook.md`、`instagram.md`、`threads.md` 或 `x.md`。
+- 平台 UI 改版：重新讀取當下 DOM／accessibility state，更新對應平台 reference 或 `references/chrome-comment-adapter.md`；不要把舊 CSS selector 當成長期合約。
+- P5 掃描被拒絕：先用 `browser-scan-request` 把當前 session、帳號、貼文與期限寫入本機 ledger，再讓 scan receipt 回綁輸出的 request ID；不可讓 Chrome 自己宣告 scope。

@@ -177,6 +177,15 @@ def check_public_sync_guard() -> None:
         config = {"sync": {"privacy": {"tokens": ["private-account"], "patterns": []}}}
         if not privacy_violations([(candidate, "candidate.md")], config):
             raise AssertionError("public sync privacy token was not blocked")
+        secret_fixture = "Authorization: " + "Bearer " + "private-" + "secret-value"
+        candidate.write_text(secret_fixture, encoding="utf-8")
+        pattern_config = {
+            "sync": {"privacy": {"tokens": [], "patterns": [
+                r"(?i)Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~-]{8,}",
+            ]}},
+        }
+        if not privacy_violations([(candidate, "candidate.md")], pattern_config):
+            raise AssertionError("public sync credential-shaped pattern was not blocked")
         try:
             safe_destination(root, "../escape.txt")
         except ValueError:

@@ -37,6 +37,7 @@
 
 - `data/comment_events.jsonl`：Chrome 可見留言 observation；同留言編輯時追加 observation，不覆寫。
 - `data/reply_events.jsonl`：草稿、核准、送出前標記、驗證與對帳事件；append-only。
+- `data/browser_scan_requests.jsonl`：使用者／當前 session 在掃描前指定的帳號、貼文與期限；append-only，Chrome receipt 不能自己改 scope。
 - `references/comment-policy.json`：通用分類與自動化停損；不得放帳號、Cookie、token 或私人留言。
 
 先驗證：
@@ -60,6 +61,16 @@ python scripts/comment_assistant.py queue --format json
 
 沒有 permalink 時先取得 permalink；無法可靠定位就只做 `draft_only`。只掃指定貼文目前可見的新留言，不巡整個帳號歷史。
 
+先把這次 read-only 目標寫入 ledger，保存輸出的 `scan_request_id`：
+
+```powershell
+python scripts/comment_assistant.py browser-scan-request --platform instagram `
+  --account-key <account> --post-key <post> --post-permalink <permalink> `
+  --session-id <current-session> --ttl-minutes 10 --write
+```
+
+scan request 由操作方先建立，Chrome 只能回綁；換帳號、換貼文、換 session 或逾時都要重建。
+
 ## 2. 讀取 Chrome 畫面
 
 需要實際掃描或送出時才載入 `chrome:control-chrome`。沿用已登入狀態，但：
@@ -79,6 +90,7 @@ python scripts/comment_assistant.py queue --format json
   "account_key": "expected-account",
   "post_key": "platform-post-id",
   "post_permalink": "https://platform.example/post/id",
+  "observed_parent_post_permalink": "https://platform.example/post/id",
   "platform_comment_id": "stable-id-if-visible",
   "author_key": "visible-author-handle",
   "author_display": "Visible name",
@@ -91,14 +103,16 @@ python scripts/comment_assistant.py queue --format json
 }
 ```
 
-以 JSON 檔或 stdin dry-run：
+把當下 Chrome 畫面整理成 `chrome-comment-adapter.md` 定義的 scan receipt；以 JSON 檔或 stdin dry-run：
 
 ```powershell
-python scripts/comment_assistant.py ingest <comments.json>
-python scripts/comment_assistant.py ingest <comments.json> --write
+python scripts/comment_assistant.py browser-scan <scan.json> `
+  --scan-request-id <request-id> --session-id <current-session>
+python scripts/comment_assistant.py browser-scan <scan.json> `
+  --scan-request-id <request-id> --session-id <current-session> --write
 ```
 
-重掃同一份可見內容會回報 `unchanged`，不新增事件。
+`browser-scan` 會驗證 stored request、session、期限、登入狀態、平台 host、帳號／貼文／每則留言的 observed parent、布林型別與單次掃描上限。重掃同一份可見內容會回報 `unchanged`，不新增事件。raw `ingest` 只保留給舊資料與本地測試，不能作為 live Chrome 掃描入口。
 
 ## 3. 分類與草擬
 
@@ -156,38 +170,41 @@ python scripts/comment_assistant.py revoke-grant --grant-id <grant-id> `
 
 每一則都依序完成，不能先全點再補紀錄：
 
-1. 回到指定 permalink，重新確認帳號、貼文、留言作者、完整本文與 fingerprint。
-2. 確認 reply composer 為空；有殘留文字就停。
-3. **在任何可能送出的點擊／Enter 前**先寫 `send_started`：
+1. 先從 canonical ledger 產生不可變 action envelope：
 
    ```powershell
-   python scripts/comment_assistant.py begin-send --intent-id <id> `
-     --session-id <current-session> --write
+   python scripts/comment_assistant.py browser-action --intent-id <id> `
+     --session-id <current-session>
    ```
 
-4. 只輸入已核准的單行文字。使用當下 UI 的唯一送出動作一次。
-5. 重新讀取該留言串；只有看到自己的帳號在正確層級出現完全相同文字，才記：
+2. 回到 action 指定 permalink，重新確認帳號、貼文、留言作者、完整本文、fingerprint、空 composer 與唯一可見回覆控制；再填入 action 內已核准文字並讀回完全相同內容，把「原本為空＋目前文字吻合」寫成 fresh preflight receipt。
+3. **在任何可能送出的點擊／Enter 前**，讓 ledger 驗證 preflight 並寫 `send_started`：
 
    ```powershell
-   python scripts/comment_assistant.py finish-send --intent-id <id> --result sent `
-     --session-id <current-session> --evidence "exact reply visible under target" --write
+   python scripts/comment_assistant.py browser-begin <preflight.json> `
+     --intent-id <id> --session-id <current-session> --write
    ```
 
-6. 若可能已點擊但無法確認，記 `unknown` 並停止整批，不得重送：
+4. 只有看到 `WRITE_OK` 才能對已核對文字執行當下 UI 的唯一送出動作一次。不得再改字或自動重試。
+5. 重新讀取該留言串，建立 post-submit receipt。只有自己的帳號在正確父層級出現完全相同文字，所有驗證旗標才可為 `true`；交由 ledger 分類：
 
    ```powershell
-   python scripts/comment_assistant.py finish-send --intent-id <id> --result unknown `
-     --session-id <current-session> --reason browser_result_uncertain --write
+   python scripts/comment_assistant.py browser-finish <result.json> `
+     --intent-id <id> --session-id <current-session> --write
    ```
 
-7. 下一次先重新讀畫面對帳：
+   - 確認送出且完整驗證：`sent_verified`
+   - 明確沒有執行送出、已不可能送出，而且畫面沒有 exact／own 成功證據：`failed`
+   - 其餘狀況一律：`needs_reconcile`，立即停止整批且不得重送
+
+6. 下一次先重新讀畫面，建立 `chrome-comment-adapter.md` 定義的 fresh reinspection receipt，再對帳：
 
    ```powershell
-   python scripts/comment_assistant.py reconcile --intent-id <id> --result sent `
-     --session-id <current-session> --evidence "reply found after reload" --write
+   python scripts/comment_assistant.py browser-reconcile <reinspection.json> `
+     --intent-id <id> --session-id <current-session> --write
    ```
 
-   只有明確證明未送出才可用 `--result not-sent`，並重新取得新 permit。
+   找到 own-account exact reply 才能記 `reconciled_sent`；完整展開並明確驗證不存在時才能記 `reconciled_not_sent`。仍不確定就不改 ledger、不重送。raw `begin-send`／`finish-send`／`reconcile` 只保留隔離 fixture ledger 測試，active skill ledger 會直接拒絕；live P5 必須走 browser bridge。
 
 ## 全批立即停止條件
 

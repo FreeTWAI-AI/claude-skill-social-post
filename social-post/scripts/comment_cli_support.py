@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from comment_browser_contract import replay_browser_scan_requests
 from comment_state import validate_comment_store
 from comment_store import comment_store_revision, commit_comment_records, load_comment_records
 
@@ -43,6 +44,14 @@ def load_state(
     records = load_comment_records(root / "data")
     policy = load_policy(root)
     result = validate_comment_store(records["comments"], records["replies"], policy)
+    browser_scan_requests, request_errors = replay_browser_scan_requests(
+        records["scan_requests"],
+        int(policy.get("maximum_browser_scan_request_ttl_seconds", 600)),
+    )
+    result["browser_scan_requests"] = browser_scan_requests
+    if request_errors:
+        result["errors"].extend(request_errors)
+        result["valid"] = False
     result["revision"] = comment_store_revision(root / "data")
     result["counts"] = {
         "comment_events": len(records["comments"]),
@@ -50,6 +59,7 @@ def load_state(
         "comments": len(result["latest_comments"]),
         "active_intents": len(result["reply_states"]),
         "authorization_grants": len(result.get("authorization_grants", {})),
+        "browser_scan_requests": len(browser_scan_requests),
     }
     return records, policy, result
 
@@ -63,6 +73,13 @@ def validate_staged(
     records: dict[str, list[dict[str, Any]]], policy: dict[str, Any],
 ) -> dict[str, Any]:
     result = validate_comment_store(records["comments"], records["replies"], policy)
+    _requests, request_errors = replay_browser_scan_requests(
+        records["scan_requests"],
+        int(policy.get("maximum_browser_scan_request_ttl_seconds", 600)),
+    )
+    if request_errors:
+        result["errors"].extend(request_errors)
+        result["valid"] = False
     require_valid(result)
     return result
 

@@ -17,15 +17,22 @@
     "CASE": ["social-post/references/case_studies.md"]
   },
   "sync": {"public_root": null, "ignore": []},
-  "privacy": {"tokens": [], "patterns": ["C:[/\\\\]Users[/\\\\]"]},
+  "privacy": {"tokens": [], "patterns": [
+    "C:[/\\\\]Users[/\\\\]",
+    "(?i)Authorization\\s*:\\s*Bearer\\s+[A-Za-z0-9._~-]{8,}",
+    "(?i)Cookie\\s*:\\s*[^;\\r\\n]{8,}",
+    "(?i)Chrome[/\\\\]User Data[/\\\\](Default|Profile [0-9]+)",
+    "(?i)(access[_-]?token|session[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password)\\s*[:=]\\s*[\\\"'][^\\\"']{8,}[\\\"']",
+    "\\.(har|trace)$"
+  ]},
   "architecture": {
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py", "social-post/scripts/comment_identity.py", "social-post/scripts/comment_authorization.py", "social-post/scripts/comment_domain.py", "social-post/scripts/comment_policy.py"], "may_depend_on": []},
+      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py", "social-post/scripts/comment_identity.py", "social-post/scripts/comment_authorization.py", "social-post/scripts/comment_domain.py", "social-post/scripts/comment_policy.py", "social-post/scripts/comment_browser_contract.py"], "may_depend_on": []},
       {"name": "storage", "patterns": ["social-post/scripts/social_store.py", "social-post/scripts/comment_store.py"], "may_depend_on": []},
       {"name": "application", "patterns": ["social-post/scripts/social_data.py", "social-post/scripts/comment_state.py"], "may_depend_on": ["domain", "storage"]},
-      {"name": "cli", "patterns": ["social-post/scripts/log_outcome.py", "social-post/scripts/comment_assistant.py", "social-post/scripts/comment_cli_support.py"], "may_depend_on": ["application", "domain", "storage"]},
+      {"name": "cli", "patterns": ["social-post/scripts/log_outcome.py", "social-post/scripts/comment_assistant.py", "social-post/scripts/comment_cli_support.py", "social-post/scripts/comment_browser_cli.py"], "may_depend_on": ["application", "domain", "storage"]},
       {"name": "test", "patterns": ["social-post/scripts/self_test.py", "social-post/scripts/comment_self_test.py", "social-post/scripts/comment_test_*.py"], "may_depend_on": ["application", "domain", "storage", "cli", "tools"]},
       {"name": "tools", "patterns": ["social-post/scripts/build_rule_registry.py", "social-post/scripts/split_*.py"], "may_depend_on": []}
     ],
@@ -37,6 +44,8 @@
       {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_domain.py"},
       {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_policy.py"},
       {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_cli_support.py"},
+      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_browser_cli.py"},
+      {"source": "social-post/scripts/comment_browser_cli.py", "target": "social-post/scripts/comment_browser_contract.py"},
       {"source": "social-post/scripts/comment_cli_support.py", "target": "social-post/scripts/comment_state.py"},
       {"source": "social-post/scripts/comment_cli_support.py", "target": "social-post/scripts/comment_store.py"},
       {"source": "social-post/scripts/comment_domain.py", "target": "social-post/scripts/comment_authorization.py"},

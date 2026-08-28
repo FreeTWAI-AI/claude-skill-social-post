@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from comment_browser_cli import register_browser_commands
 from comment_cli_support import (
     SKILL_ROOT, commit_or_preview, configure_utf8_streams, intent_state, load_state,
     now_iso, read_json_source, require_valid,
@@ -223,6 +224,7 @@ def command_approve(args: argparse.Namespace) -> None:
 
 
 def command_begin_send(args: argparse.Namespace) -> None:
+    _require_legacy_test_root(args.root, "begin-send")
     records, policy, result = load_state(args.root)
     require_valid(result)
     comment_key, state = intent_state(result["reply_states"], args.intent_id)
@@ -250,6 +252,7 @@ def command_begin_send(args: argparse.Namespace) -> None:
 
 
 def command_finish_send(args: argparse.Namespace) -> None:
+    _require_legacy_test_root(args.root, "finish-send")
     records, policy, result = load_state(args.root)
     require_valid(result)
     comment_key, state = intent_state(result["reply_states"], args.intent_id)
@@ -278,6 +281,7 @@ def command_finish_send(args: argparse.Namespace) -> None:
 
 
 def command_reconcile(args: argparse.Namespace) -> None:
+    _require_legacy_test_root(args.root, "reconcile")
     records, policy, result = load_state(args.root)
     require_valid(result)
     comment_key, state = intent_state(result["reply_states"], args.intent_id)
@@ -337,6 +341,13 @@ def add_write_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--write", action="store_true")
 
 
+def _require_legacy_test_root(root: Path, command: str) -> None:
+    if root.resolve() == SKILL_ROOT.resolve():
+        raise ValueError(
+            f"{command} is disabled on the live skill ledger; use browser-begin/browser-finish"
+        )
+
+
 def add_session_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session-id", required=True)
     add_write_flags(parser)
@@ -345,6 +356,7 @@ def add_session_flags(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
+    register_browser_commands(sub)
     validate = sub.add_parser("validate")
     validate.add_argument("--root", type=Path, default=SKILL_ROOT)
     validate.set_defaults(handler=command_validate)

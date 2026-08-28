@@ -2,15 +2,16 @@
 
 一個可安裝到 Codex 或 Claude Code 的社群內容 Skill：學習本機聲線、規劃內容、撰寫平台化貼文、經確認後發布，以已登入 Chrome 受控管理 FB／IG／Threads 留言，並把跨平台洞察保存成可驗證的結構化資料。
 
-目前版本：**v2.3.0**。
+目前版本：**v2.4.0**。
 
-## v2.3.0
+## v2.4.0
 
-- 新增 P5 Comment Ops：零 API、使用既有 Chrome 登入狀態，支援掃描、草擬、批次確認與低風險 bounded auto。
-- 留言 observation 與 reply audit 採 append-only ledger，內建去重、stale draft、一次性 permit、送出前紀錄與不明結果對帳。
-- bounded auto 必須先建立有期限、指定平台／帳號／貼文且有總次數上限的 session grant；換 session、換 scope、撤銷或達上限即失效。
-- 公開同步改為 closed-world allowlist；任何未明確列名的新檔預設不公開。
-- 真實留言、帳號、貼文 ID、Cookie、session、token、截圖與私人數據不進公開 repo。
+- P5 從操作手冊升級成可執行的 Chrome action／receipt bridge：`browser-scan-request → browser-scan → browser-action → browser-begin → browser-finish → browser-reconcile`。
+- 掃描 scope 會先寫入有 session 與期限的 append-only request；Chrome 不能從目前頁面自行決定帳號或貼文，每則 comment anchor 也必須綁定核准貼文。
+- 每次送出會綁定 action、一次性 permit、session、平台／帳號／貼文／留言、本文 fingerprint 與最終 reply hash。
+- 送出前驗證貼文 URL、空白 composer、填入後 exact text 與 60 秒 freshness；送出後只有六項畫面證據全成立才記為 `sent_verified`。
+- 任何 timeout、導頁、矛盾狀態或不明結果一律 `needs_reconcile`，不自動重點；重新檢視仍不確定就保持 `NO_CHANGE`。
+- 正式 ledger 會拒絕可繞過 bridge 的 raw begin／finish／reconcile；三平台匿名 fixture 與負向測試可安全開源。
 
 ## 安裝
 
@@ -50,7 +51,7 @@ Copy-Item content_plan.example.md content_plan.md
 
 ## Comment Ops 快速開始
 
-P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供無邊界的全自動模式。實際掃描與送出需要執行環境提供 `chrome:control-chrome` 及已連線的 Chrome；沒有瀏覽器控制能力時仍可使用草稿、政策、ledger 與測試功能。
+P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供 24/7 背景監聽或無邊界的全自動模式。實際掃描與送出需要執行環境提供 `chrome:control-chrome`、使用者已開啟的 Chrome 與既有登入狀態；沒有瀏覽器控制能力時仍可使用草稿、政策、ledger 與測試功能。
 
 ```powershell
 $env:PYTHONUTF8='1'
@@ -59,7 +60,7 @@ python scripts/comment_assistant.py queue --format json
 python scripts/comment_self_test.py
 ```
 
-實際流程與停損條件見 [`comment-operations.md`](social-post/references/comment-operations.md)。所有 ledger command 預設 dry-run，明確加上 `--write` 才會寫入本機。
+實際流程與停損條件見 [`comment-operations.md`](social-post/references/comment-operations.md)，JSON bridge contract 見 [`chrome-comment-adapter.md`](social-post/references/chrome-comment-adapter.md)。定位依當下可見 DOM／accessibility state 建立，不使用一組長期寫死的 Meta selector。所有 ledger command 預設 dry-run，明確加上 `--write` 才會寫入本機。
 
 ## Outcome 快速開始
 
@@ -79,7 +80,7 @@ python scripts/social_data.py summary --series demo-series
 
 - `style_profile.md`、`content_plan.md`、`drafts/`；
 - `data/*.jsonl` 的真實 outcome／correction；
-- `comment_events.jsonl`、`reply_events.jsonl` 的真實留言、作者、貼文與回覆；
+- `comment_events.jsonl`、`reply_events.jsonl`、`browser_scan_requests.jsonl` 的真實留言、作者、貼文、回覆與掃描目標；
 - 原始洞察截圖、caption archive、帳號名稱、個人路徑；
 - Cookie、session、access token、瀏覽器 profile、登入資料；
 - 從私人數據升級出的規則、公式或案例。

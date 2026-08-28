@@ -12,7 +12,9 @@ from typing import Any
 from social_store import exclusive_store_lock, load_jsonl, write_jsonl
 
 
-COMMENT_FILENAMES = ("comment_events.jsonl", "reply_events.jsonl")
+COMMENT_FILENAMES = (
+    "comment_events.jsonl", "reply_events.jsonl", "browser_scan_requests.jsonl",
+)
 
 
 def comment_store_revision(data_dir: Path) -> str:
@@ -31,6 +33,7 @@ def load_comment_records(data_dir: Path) -> dict[str, list[dict[str, Any]]]:
     return {
         "comments": load_jsonl(data_dir / COMMENT_FILENAMES[0]),
         "replies": load_jsonl(data_dir / COMMENT_FILENAMES[1]),
+        "scan_requests": load_jsonl(data_dir / COMMENT_FILENAMES[2]),
     }
 
 
@@ -40,6 +43,7 @@ def commit_comment_records(
     destinations = {
         "comments": data_dir / COMMENT_FILENAMES[0],
         "replies": data_dir / COMMENT_FILENAMES[1],
+        "scan_requests": data_dir / COMMENT_FILENAMES[2],
     }
     with exclusive_store_lock(data_dir):
         current = comment_store_revision(data_dir)
@@ -58,7 +62,7 @@ def commit_comment_records(
             staged = {}
             for name, destination in destinations.items():
                 path = staging / destination.name
-                write_jsonl(path, records[name])
+                write_jsonl(path, records.get(name, []))
                 staged[destination] = path
             try:
                 for destination, source in staged.items():
