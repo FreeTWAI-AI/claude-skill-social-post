@@ -68,6 +68,7 @@ def scan_payload(adapter: LocalFixtureCommentAdapter, request: dict) -> dict:
     })
     return {
         "schema_version": 1,
+        "test_only": False,
         "scan_request_id": request["scan_request_id"],
         "session_id": request["session_id"],
         "platform": request["platform"],
@@ -79,6 +80,12 @@ def scan_payload(adapter: LocalFixtureCommentAdapter, request: dict) -> dict:
         "authentication_state": "authenticated",
         "account_verified": True,
         "post_verified": True,
+        "thread_expansion_evidence": {
+            "provided": True,
+            "comments_expanded": True,
+            "replies_expanded": True,
+            "evidence": "fixture fully expanded comment and reply threads",
+        },
         "comments": [comment],
     }
 
@@ -98,7 +105,7 @@ def submit_scan(
 def approved_action(
     root: Path, platform: str,
 ) -> tuple[Path, LocalFixtureCommentAdapter, Path, str, dict]:
-    script, _unused = prepare_cli_fixture(root)
+    script, _unused = prepare_cli_fixture(root, live_browser_actuation_enabled=True)
     adapter = LocalFixtureCommentAdapter(platform)
     request = create_scan_request(script, root, adapter)
     payload = scan_payload(adapter, request)
@@ -184,7 +191,7 @@ def check_visible_reply_cannot_be_failed() -> None:
 def check_scan_requires_stored_request() -> None:
     with tempfile.TemporaryDirectory(prefix="social-scan-binding-") as raw:
         root = Path(raw)
-        script, _unused = prepare_cli_fixture(root)
+        script, _unused = prepare_cli_fixture(root, live_browser_actuation_enabled=True)
         adapter = LocalFixtureCommentAdapter("instagram")
         request = create_scan_request(script, root, adapter)
         payload = scan_payload(adapter, request)
@@ -208,7 +215,7 @@ def check_wrong_post_comment_permalink_rejected() -> None:
     for platform in ("facebook", "instagram", "threads"):
         with tempfile.TemporaryDirectory(prefix=f"social-{platform}-parent-") as raw:
             root = Path(raw)
-            script, _unused = prepare_cli_fixture(root)
+            script, _unused = prepare_cli_fixture(root, live_browser_actuation_enabled=True)
             adapter = LocalFixtureCommentAdapter(platform)
             request = create_scan_request(script, root, adapter)
             payload = scan_payload(adapter, request)

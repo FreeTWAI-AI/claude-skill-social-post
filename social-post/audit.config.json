@@ -33,11 +33,12 @@
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["scripts/social_validation.py", "scripts/comment_identity.py", "scripts/comment_authorization.py", "scripts/comment_domain.py", "scripts/comment_policy.py", "scripts/comment_browser_contract.py"], "may_depend_on": []},
+      {"name": "domain", "patterns": ["scripts/social_validation.py", "scripts/comment_identity.py", "scripts/comment_authorization.py", "scripts/comment_domain.py", "scripts/comment_policy.py", "scripts/comment_browser_contract.py", "scripts/comment_browser_common.py", "scripts/comment_browser_scan_contract.py", "scripts/comment_browser_send_contract.py"], "may_depend_on": []},
       {"name": "storage", "patterns": ["scripts/social_store.py", "scripts/comment_store.py"], "may_depend_on": []},
-      {"name": "application", "patterns": ["scripts/social_data.py", "scripts/comment_state.py"], "may_depend_on": ["domain", "storage"]},
+      {"name": "application", "patterns": ["scripts/social_data.py", "scripts/comment_state.py", "scripts/comment_capability_gate.py"], "may_depend_on": ["domain", "storage"]},
       {"name": "cli", "patterns": ["scripts/log_outcome.py", "scripts/comment_assistant.py", "scripts/comment_cli_support.py", "scripts/comment_browser_cli.py"], "may_depend_on": ["application", "domain", "storage"]},
-      {"name": "test", "patterns": ["scripts/self_test.py", "scripts/comment_self_test.py", "scripts/comment_test_*.py"], "may_depend_on": ["application", "domain", "storage", "cli", "tools"]},
+      {"name": "browser-actuator", "patterns": ["scripts/comment_chrome_*.mjs"], "may_depend_on": []},
+      {"name": "test", "patterns": ["scripts/self_test.py", "scripts/comment_self_test.py", "scripts/comment_test_*.py", "scripts/comment_*_test.mjs", "scripts/comment_fixture_browser_e2e.mjs"], "may_depend_on": ["application", "domain", "storage", "cli", "browser-actuator", "tools"]},
       {"name": "tools", "patterns": ["scripts/build_rule_registry.py", "scripts/split_*.py"], "may_depend_on": []}
     ],
     "required_dependencies": [

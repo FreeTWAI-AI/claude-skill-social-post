@@ -38,7 +38,10 @@
 - `data/comment_events.jsonl`：Chrome 可見留言 observation；同留言編輯時追加 observation，不覆寫。
 - `data/reply_events.jsonl`：草稿、核准、送出前標記、驗證與對帳事件；append-only。
 - `data/browser_scan_requests.jsonl`：使用者／當前 session 在掃描前指定的帳號、貼文與期限；append-only，Chrome receipt 不能自己改 scope。
+- 同一檔也追加 `browser_scan_completed`；保留留言數、零結果與展開證據，避免把「尚未掃描」誤判成「掃過但沒有留言」。
 - `references/comment-policy.json`：通用分類與自動化停損；不得放帳號、Cookie、token 或私人留言。
+- 正式 policy 的 `live_browser_actuation_enabled=false` 是獨立 kill switch：safe preview、scan request、草稿與 action 可用，但所有 live Chrome receipt 寫入 canonical ledger 都停用。測試 fixture 必須顯式設成 `true`，使用者批准本身不能打開它。
+- `comment-capabilities.json`：closed-world 能力義務；contract、真瀏覽器 fixture、live 三平台與 bounded auto 不互相冒充完成。
 
 先驗證：
 
@@ -46,9 +49,11 @@
 $env:PYTHONUTF8='1'
 python scripts/comment_assistant.py validate
 python scripts/comment_assistant.py queue --format json
+python scripts/comment_capability_gate.py
 ```
 
 所有寫入 command 預設 dry-run；確認 JSON 正確才加 `--write`。
+目前 release 的 live Chrome mutation 預設停用；下列 `browser-scan／begin／finish／reconcile --write` 指令只有隔離 contract fixture 明示 opt-in 時可成功，不能視為已通過登入 Meta canary。
 
 ## 1. 選定範圍
 
@@ -103,7 +108,7 @@ scan request 由操作方先建立，Chrome 只能回綁；換帳號、換貼文
 }
 ```
 
-把當下 Chrome 畫面整理成 `chrome-comment-adapter.md` 定義的 scan receipt；以 JSON 檔或 stdin dry-run：
+依當下 DOM 建立短命 locator plan，交給 `scripts/comment_chrome_actuator.mjs` 的 `scanPost()` 產生 `chrome-comment-adapter.md` 定義的 scan receipt；locator plan 不跨頁面／改版保存。以 JSON 檔或 stdin dry-run：
 
 ```powershell
 python scripts/comment_assistant.py browser-scan <scan.json> `
@@ -112,7 +117,7 @@ python scripts/comment_assistant.py browser-scan <scan.json> `
   --scan-request-id <request-id> --session-id <current-session> --write
 ```
 
-`browser-scan` 會驗證 stored request、session、期限、登入狀態、平台 host、帳號／貼文／每則留言的 observed parent、布林型別與單次掃描上限。重掃同一份可見內容會回報 `unchanged`，不新增事件。raw `ingest` 只保留給舊資料與本地測試，不能作為 live Chrome 掃描入口。
+`browser-scan` 會驗證 stored request、session、期限、登入狀態、平台 host、帳號／貼文／每則留言的 observed parent、布林型別與單次掃描上限；成功時追加 completion event。重送完全相同 scan 會回報 `unchanged`，也不重複追加 completion。raw `ingest` 只保留給舊資料與本地測試，不能作為 live Chrome 掃描入口。
 
 ## 3. 分類與草擬
 
@@ -177,16 +182,16 @@ python scripts/comment_assistant.py revoke-grant --grant-id <grant-id> `
      --session-id <current-session>
    ```
 
-2. 回到 action 指定 permalink，重新確認帳號、貼文、留言作者、完整本文、fingerprint、空 composer 與唯一可見回覆控制；再填入 action 內已核准文字並讀回完全相同內容，把「原本為空＋目前文字吻合」寫成 fresh preflight receipt。
-3. **在任何可能送出的點擊／Enter 前**，讓 ledger 驗證 preflight 並寫 `send_started`：
+2. 回到 action 指定 permalink，從 fresh DOM snapshot 建立 locator plan；用 `comment_chrome_actuator.mjs` 的 `prepareReply()` 重新確認帳號、貼文、強留言 anchor、作者、完整本文，以及同一父留言內的 reply trigger／空 composer／唯一 submit。先完整展開回覆並確認 exact-own baseline 為 0，再填入 action 內已核准文字；receipt 會綁定重算後的 reply hash、action digest、plan digest 與 preparation ID。
+3. **在任何可能送出的點擊／Enter 前**，以 `comment_chrome_claim_bridge.mjs` 讓 ledger 驗證 preparation 並原子寫入 `send_started`：
 
    ```powershell
    python scripts/comment_assistant.py browser-begin <preflight.json> `
      --intent-id <id> --session-id <current-session> --write
    ```
 
-4. 只有看到 `WRITE_OK` 才能對已核對文字執行當下 UI 的唯一送出動作一次。不得再改字或自動重試。
-5. 重新讀取該留言串，建立 post-submit receipt。只有自己的帳號在正確父層級出現完全相同文字，所有驗證旗標才可為 `true`；交由 ledger 分類：
+4. CLI 只有在 durable commit 成功後才輸出結構化 `SUBMIT_CLAIM`；`submitOnce()` 只接受逐欄綁定的 claim callback，不接受裸 `WRITE_OK`。process-wide reservation 與 append-only ledger 共同阻擋同程序併發、actor 重建與跨程序重播。claim 後不得改字、換 plan 或自動重試。
+5. 重新完整展開並讀取該留言串，用 `inspectResult()` 建立 post-submit receipt。只有 exact-own baseline 原本為 0、現在於正確父層恰好出現一份完全相同文字、送後總回覆數至少為送出前基線＋1，而且所有 reply item 都可檢查，所有驗證旗標才可為 `true`；receipt 也必須沿用 preparation／claim／preflight。再交由 ledger 分類：
 
    ```powershell
    python scripts/comment_assistant.py browser-finish <result.json> `
@@ -204,7 +209,7 @@ python scripts/comment_assistant.py revoke-grant --grant-id <grant-id> `
      --intent-id <id> --session-id <current-session> --write
    ```
 
-   找到 own-account exact reply 才能記 `reconciled_sent`；完整展開並明確驗證不存在時才能記 `reconciled_not_sent`。仍不確定就不改 ledger、不重送。raw `begin-send`／`finish-send`／`reconcile` 只保留隔離 fixture ledger 測試，active skill ledger 會直接拒絕；live P5 必須走 browser bridge。
+   找到 own-account exact reply且目前總回覆數至少為送出前基線＋1，才能記 `reconciled_sent`；完整展開、沒有任何 own-author reply，而且總數未低於基線時，才能記 `reconciled_not_sent`。文字被平台正規化、回覆總數倒退或其他不確定情況都不改 ledger、不重送。raw `begin-send`／`finish-send`／`reconcile` 只保留隔離 fixture ledger 測試，active skill ledger 會直接拒絕；live P5 必須走 browser bridge。
 
 ## 全批立即停止條件
 
@@ -214,6 +219,7 @@ python scripts/comment_assistant.py revoke-grant --grant-id <grant-id> `
 - 回覆按鈕、留言框、層級或送出控制無法可靠辨識。
 - composer 已有文字、核准文字含換行、需要媒體／GIF／私訊。
 - 可能已送出但沒有畫面驗證、網路中斷、頁面重載或使用者接管操作。
+- 同 session、同平台、同帳號與同貼文已有任何 active `needs_reconcile`；domain 會同時阻擋新的 `browser-action` 與 `browser-begin`，完成 reconcile 才解鎖。
 - 達本輪上限、短時間留言爆量，或回覆文字開始重複。
 
 停止後保存現有 audit；不要為了清 queue 繼續點。最後執行 `validate`，回報 sent、needs_reconcile、deferred 與未處理數。
@@ -226,3 +232,5 @@ python scripts/comment_assistant.py revoke-grant --grant-id <grant-id> `
 
 介面改版時只更新平台 adapter 說明與 live 定位，不改 domain ledger、permit 或狀態機。
 Chrome 回傳不確定時也不可由 adapter 自行重試；只能寫入 `needs_reconcile`，重新檢視畫面後再以原 send attempt 對帳。
+
+Fixture 驗證入口是 `node scripts/comment_chrome_actuator_test.mjs`；真瀏覽器可在 Browser Plugin session 對 localhost 呼叫 `comment_fixture_browser_e2e.mjs`。fixture 的 URL 映射只有 loopback＋`testOnly` 才能啟用，不能放寬正式 Meta host。

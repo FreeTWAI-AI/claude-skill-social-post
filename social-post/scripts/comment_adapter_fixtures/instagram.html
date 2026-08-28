@@ -5,20 +5,41 @@
       data-account-key="fixture-account"
       data-post-key="fixture-instagram-post"
       data-post-permalink="https://fixture.invalid/instagram/p/fixture-instagram-post"
-      data-observed-at="2026-08-28T10:00:00+08:00">
+      data-observed-at="2026-08-28T10:00:00+08:00"
+      data-submit-attempts="0"
+      data-accepted-count="0"
+      data-fixture-runtime-state="loading">
+  <head>
+    <meta charset="utf-8">
+    <title>Instagram Comment Adapter Fixture</title>
+    <script src="fixture-runtime.js" defer></script>
+  </head>
   <body>
     <ul aria-label="留言">
       <li data-ig-comment-id="ig-comment-001"
           data-author-key="viewer-instagram"
+          data-parent-post-permalink="https://www.instagram.com/p/fixture-instagram-post"
           data-is-own="false">
         <a data-ig-comment-permalink
            href="https://fixture.invalid/instagram/p/fixture-instagram-post/c/ig-comment-001">3 小時</a>
         <span data-ig-author>Instagram Fixture Viewer</span>
         <span data-ig-body>女主角下一集會反擊嗎？</span>
+        <button data-ig-reply-trigger aria-label="回覆 Instagram Fixture Viewer">回覆</button>
+        <ul data-ig-own-replies aria-live="polite"></ul>
+        <textarea data-ig-composer aria-label="新增留言……"></textarea>
+        <button data-ig-submit type="button">發佈</button>
+      </li>
+      <li data-ig-comment-id="ig-comment-decoy"
+          data-author-key="viewer-instagram-decoy"
+          data-parent-post-permalink="https://www.instagram.com/p/fixture-instagram-post"
+          data-is-own="false">
+        <span data-ig-author>Instagram Decoy Viewer</span>
+        <span data-ig-body>這一則不能收到目標回覆。</span>
+        <button data-ig-reply-trigger aria-label="回覆 Instagram Decoy Viewer">回覆</button>
+        <ul data-ig-own-replies aria-live="polite"></ul>
+        <textarea data-ig-composer aria-label="新增留言……"></textarea>
+        <button data-ig-submit type="button">發佈</button>
       </li>
     </ul>
-    <textarea data-ig-composer aria-label="新增留言……"></textarea>
-    <button data-ig-submit type="submit">發佈</button>
-    <ul data-ig-own-replies aria-live="polite"></ul>
   </body>
 </html>

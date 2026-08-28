@@ -87,18 +87,19 @@ def validate_staged(
 def commit_or_preview(
     records: dict[str, list[dict[str, Any]]], policy: dict[str, Any], base_revision: str,
     payload: Any, *, root: Path, write: bool,
-) -> None:
+) -> str | None:
     validate_staged(records, policy)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     if not write:
         print("DRY_RUN valid; add --write to commit")
-        return
+        return None
     new_revision = commit_comment_records(
         records, data_dir=root / "data", expected_revision=base_revision,
     )
     _records, _policy, result = load_state(root)
     require_valid(result)
     print(f"WRITE_OK revision={new_revision}")
+    return new_revision
 
 
 def read_json_source(value: str) -> Any:

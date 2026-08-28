@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.5.0 — 2026-08-28
+
+### Added
+
+- Reusable live-DOM Chrome actuator with `scanPost`, `prepareReply`, `submitOnce`, `inspectResult` and `reinspect` interfaces.
+- Split actuator facade into scan, send, shared evidence, and durable Python-ledger claim modules.
+- Interactive Facebook, Instagram and Threads localhost fixtures plus a Browser Plugin E2E driver.
+- Durable `browser_scan_completed` events, including zero-result and thread-expansion evidence.
+- Closed-world comment capability ledger and calibrated negative gate.
+- Default-deny live browser policy gate with byte-identical no-mutation regressions for scan, begin, finish and reconcile.
+
+### Changed
+
+- A same-session, same-scope `needs_reconcile` intent now blocks later browser actions and preflights until reconciliation.
+- Approved reply text is SHA-256 checked and preparation binds canonical action, fresh locator plan, strong parent anchor, parent-scoped controls, and a zero exact-own baseline.
+- Bare `WRITE_OK` was replaced by an atomic, structured `SUBMIT_CLAIM`; process-wide reservation plus append-only ledger state block concurrency, actor recreation, and cross-process replay.
+- Post-submit success requires a fully expanded and inspectable reply set, exactly one new own-account exact reply under the verified parent, and a total reply count at least one above the persisted pre-submit baseline. Count regression or equal-total replacement remains uncertain.
+- Test-only receipts, URL credentials, non-default ports, alternate origins, mutable expected evidence, hidden/malformed replies, and pre-existing duplicates now fail closed.
+- Comment self-tests now include the JavaScript actuator contract when Node is available.
+
+### Boundary
+
+- Contract and pure-Node tests are verified. Release policy ships with `live_browser_actuation_enabled:false`; real Browser Plugin fixture journeys, trusted platform adapters and authenticated FB／IG／Threads canaries remain explicitly `blocked_external`. Live actuation must not be enabled until receipt provenance, locator attestation and same-node click guards are implemented and validated.
+
 ## v2.4.0 — 2026-08-28
 
 ### Added

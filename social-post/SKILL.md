@@ -20,7 +20,7 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 | 寫一篇、PO、發文 | P2 Draft／Publish | `references/generate_and_publish.md`＋`voice_quick.md`＋`current_brief.md`＋單一 formula；確認後才讀平台 ref |
 | 把數據訓練進來、記錄成效 | P3 Log Outcome | `references/outcome-workflow.md`＋`data/*.jsonl` |
 | 比較貼文／集數、找 pattern | P4 Optimize Patterns | `references/outcome-workflow.md`＋`references/evaluation.md`＋相關 rules |
-| 掃描、草擬、回覆 FB／IG／Threads 留言 | P5 Comment Ops | `references/comment-operations.md`＋實際操作時的 `references/chrome-comment-adapter.md`＋`references/comment-policy.json`＋目標平台 ref＋`voice_quick.md` |
+| 掃描、草擬、回覆 FB／IG／Threads 留言 | P5 Comment Ops | `references/comment-operations.md`＋實際操作時的 `references/chrome-comment-adapter.md`＋`scripts/comment_chrome_actuator.mjs`＋`references/comment-policy.json`＋目標平台 ref＋`voice_quick.md` |
 | 查歷史 Case | Legacy Case | `references/case_studies.md` 索引，再讀單一 `references/cases/case-NN.md` |
 
 路由前用一句話告知正在做哪個 Mode。單純診斷不需要 Chrome。
@@ -42,6 +42,7 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 | Chrome 掃描目標／期限 | `data/browser_scan_requests.jsonl`；私人 append-only ledger，先建立再掃描 |
 | 回覆草稿／permit／送出／對帳 | `data/reply_events.jsonl`；私人 append-only ledger |
 | 留言自動化政策 | `references/comment-policy.json` |
+| 留言能力完成度／外部 canary | `comment-capabilities.json`；只有 gate 可驗證，fixture 與 live 分開 |
 
 新成效不得只寫進 Markdown。先寫 JSONL，再視需要更新人類摘要。
 
@@ -75,7 +76,8 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 - 發佈前必須在當前對話取得明確「確認」。
 - 使用者若在當前 session 明示「你自己操作不用問」，私人版可免逐次確認；不跨 session。
 - 不幫登入、不改帳號／隱私、不刪文、不自動按讚／follow／大量留言。
-- P5 掃描前先以當前 session 建立有期限的 browser scan request，Chrome receipt 只能回綁既定帳號／貼文 scope。P5 預設 `batch_confirm`；`bounded_auto` 只在當前 session 明示平台、帳號、貼文與本輪範圍後，以有期限、指定 scope、有限次數的 ledger grant 啟用。每則回覆都要一次性 permit、送出前 audit、送出後畫面驗證；分批執行不得重置 grant 上限。
+- P5 掃描前先以當前 session 建立有期限的 browser scan request，Chrome receipt 只能回綁既定帳號／貼文 scope，完成掃描即追加可區分零留言的 completion event。P5 預設 `batch_confirm`；`bounded_auto` 只在當前 session 明示平台、帳號、貼文與本輪範圍後，以有期限、指定 scope、有限次數的 ledger grant 啟用。每則回覆都要一次性 permit；重算 reply hash，綁定 action／fresh locator／正確父留言與零 exact-own baseline；再經 durable atomic claim、process-wide 單次送出及完整畫面驗證。裸 `WRITE_OK`、fixture receipt、重播 claim、未全展開或不可檢查的回覆串一律拒絕；分批執行不得重置 grant 上限。
+- 正式版 `comment-policy.json` 的 `live_browser_actuation_enabled` 預設為 `false`：仍可建立 scan request、執行 dry-run／草稿與產生 action，但 `browser-scan --write`、`browser-begin --write`、`browser-finish --write`、`browser-reconcile --write` 在受控 Browser fixture 與登入 canary 完成前一律拒絕。使用者核准回覆不會繞過這個維護者 kill switch。
 - 送出結果不明時標記 `needs_reconcile` 並停止整批；未重新讀取畫面前不得重送。零 API Chrome 模式不宣稱 24/7 背景監聽。
 - P5 不處理私訊、媒體／GIF 回覆或全帳號歷史爬取；大量 keyword 索取改用單一公開作者留言提供自助入口。
 - 預設跨平台重新包裝；但使用者明示「同步發布／一稿多發」時，正文共用一份，只有平台必填欄位沿用正文內容（例如 YouTube 標題取第一句），不再額外維護多套文案。

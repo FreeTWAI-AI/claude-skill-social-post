@@ -5,19 +5,39 @@
       data-account-key="fixture-account"
       data-post-key="fixture-facebook-post"
       data-post-permalink="https://fixture.invalid/facebook/posts/fixture-facebook-post"
-      data-observed-at="2026-08-28T10:00:00+08:00">
+      data-observed-at="2026-08-28T10:00:00+08:00"
+      data-submit-attempts="0"
+      data-accepted-count="0"
+      data-fixture-runtime-state="loading">
+  <head>
+    <meta charset="utf-8">
+    <title>Facebook Comment Adapter Fixture</title>
+    <script src="fixture-runtime.js" defer></script>
+  </head>
   <body>
     <article data-fb-comment-id="fb-comment-001"
              data-author-key="viewer-facebook"
+             data-parent-post-permalink="https://www.facebook.com/fixture/posts/fixture-facebook-post"
              data-is-own="false">
       <a data-fb-comment-permalink
          href="https://fixture.invalid/facebook/posts/fixture-facebook-post?comment_id=fb-comment-001">2 小時</a>
       <strong data-fb-author>Facebook Fixture Viewer</strong>
       <div data-fb-body>這個測試太精彩了🔥</div>
       <button data-fb-reply-trigger aria-label="回覆 Facebook Fixture Viewer">回覆</button>
+      <div data-fb-own-replies aria-live="polite"></div>
+      <div data-fb-composer contenteditable="true" role="textbox" aria-label="輸入回覆"></div>
+      <button data-fb-submit type="button" aria-label="送出回覆">送出</button>
     </article>
-    <div data-fb-composer contenteditable="true" role="textbox" aria-label="輸入回覆"></div>
-    <button data-fb-submit aria-label="送出回覆">送出</button>
-    <div data-fb-own-replies aria-live="polite"></div>
+    <article data-fb-comment-id="fb-comment-decoy"
+             data-author-key="viewer-facebook-decoy"
+             data-parent-post-permalink="https://www.facebook.com/fixture/posts/fixture-facebook-post"
+             data-is-own="false">
+      <strong data-fb-author>Facebook Decoy Viewer</strong>
+      <div data-fb-body>這一則不能收到目標回覆。</div>
+      <button data-fb-reply-trigger aria-label="回覆 Facebook Decoy Viewer">回覆</button>
+      <div data-fb-own-replies aria-live="polite"></div>
+      <div data-fb-composer contenteditable="true" role="textbox" aria-label="輸入回覆"></div>
+      <button data-fb-submit type="button" aria-label="送出回覆">送出</button>
+    </article>
   </body>
 </html>

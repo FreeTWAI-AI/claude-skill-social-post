@@ -31,13 +31,17 @@ def run_cli(
     return completed
 
 
-def prepare_cli_fixture(root: Path) -> tuple[Path, Path]:
+def prepare_cli_fixture(
+    root: Path, *, live_browser_actuation_enabled: bool = False,
+) -> tuple[Path, Path]:
     (root / "data").mkdir()
     (root / "references").mkdir()
     (root / "data" / "comment_events.jsonl").write_text("", encoding="utf-8")
     (root / "data" / "reply_events.jsonl").write_text("", encoding="utf-8")
+    fixture_policy = dict(POLICY)
+    fixture_policy["live_browser_actuation_enabled"] = live_browser_actuation_enabled
     (root / "references" / "comment-policy.json").write_text(
-        json.dumps(POLICY), encoding="utf-8",
+        json.dumps(fixture_policy), encoding="utf-8",
     )
     source = root / "comment.json"
     source.write_text(

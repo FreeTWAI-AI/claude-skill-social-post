@@ -29,11 +29,12 @@
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py", "social-post/scripts/comment_identity.py", "social-post/scripts/comment_authorization.py", "social-post/scripts/comment_domain.py", "social-post/scripts/comment_policy.py", "social-post/scripts/comment_browser_contract.py"], "may_depend_on": []},
+      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py", "social-post/scripts/comment_identity.py", "social-post/scripts/comment_authorization.py", "social-post/scripts/comment_domain.py", "social-post/scripts/comment_policy.py", "social-post/scripts/comment_browser_contract.py", "social-post/scripts/comment_browser_common.py", "social-post/scripts/comment_browser_scan_contract.py", "social-post/scripts/comment_browser_send_contract.py"], "may_depend_on": []},
       {"name": "storage", "patterns": ["social-post/scripts/social_store.py", "social-post/scripts/comment_store.py"], "may_depend_on": []},
-      {"name": "application", "patterns": ["social-post/scripts/social_data.py", "social-post/scripts/comment_state.py"], "may_depend_on": ["domain", "storage"]},
+      {"name": "application", "patterns": ["social-post/scripts/social_data.py", "social-post/scripts/comment_state.py", "social-post/scripts/comment_capability_gate.py"], "may_depend_on": ["domain", "storage"]},
       {"name": "cli", "patterns": ["social-post/scripts/log_outcome.py", "social-post/scripts/comment_assistant.py", "social-post/scripts/comment_cli_support.py", "social-post/scripts/comment_browser_cli.py"], "may_depend_on": ["application", "domain", "storage"]},
-      {"name": "test", "patterns": ["social-post/scripts/self_test.py", "social-post/scripts/comment_self_test.py", "social-post/scripts/comment_test_*.py"], "may_depend_on": ["application", "domain", "storage", "cli", "tools"]},
+      {"name": "browser-actuator", "patterns": ["social-post/scripts/comment_chrome_*.mjs"], "may_depend_on": []},
+      {"name": "test", "patterns": ["social-post/scripts/self_test.py", "social-post/scripts/comment_self_test.py", "social-post/scripts/comment_test_*.py", "social-post/scripts/comment_*_test.mjs", "social-post/scripts/comment_fixture_browser_e2e.mjs"], "may_depend_on": ["application", "domain", "storage", "cli", "browser-actuator", "tools"]},
       {"name": "tools", "patterns": ["social-post/scripts/build_rule_registry.py", "social-post/scripts/split_*.py"], "may_depend_on": []}
     ],
     "required_dependencies": [

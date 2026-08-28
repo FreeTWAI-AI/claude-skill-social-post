@@ -130,6 +130,21 @@ def _validate_outcome_shape(
             if key not in row:
                 errors.append(f"{label} send_started event missing {key}")
         validate_scope(row.get("scope"), label, errors, include_comment=True)
+        browser_binding = (
+            "browser_action_id", "browser_preflight_id", "browser_preparation_id",
+            "browser_action_digest", "browser_plan_digest", "browser_submit_claim_id",
+        )
+        if any(row.get(key) for key in browser_binding):
+            require_non_empty_strings(row, browser_binding, label, errors)
+            baseline_total = row.get("browser_baseline_total_reply_count")
+            if (
+                not isinstance(baseline_total, int)
+                or isinstance(baseline_total, bool)
+                or baseline_total < 0
+            ):
+                errors.append(
+                    f"{label} browser_baseline_total_reply_count must be a non-negative integer"
+                )
     elif event_type == "sent_verified":
         require_non_empty_strings(row, ("session_id", "browser_evidence"), label, errors)
     elif event_type in {"reconciled_sent", "reconciled_not_sent"}:

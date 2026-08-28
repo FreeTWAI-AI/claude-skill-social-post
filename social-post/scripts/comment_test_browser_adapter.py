@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Iterator
 from urllib.parse import urlparse
 
+from comment_browser_common import _json_digest
+from comment_domain import stable_id
 from comment_state import validate_comment_store
 from comment_store import load_comment_records
 from comment_test_cli import (
@@ -29,6 +31,11 @@ EXPECTED_BODIES = {
     "facebook": "這個測試太精彩了🔥",
     "instagram": "女主角下一集會反擊嗎？",
     "threads": "有下一集記得通知我！",
+}
+EXPECTED_COMMENT_IDS = {
+    "facebook": "fb-comment-001",
+    "instagram": "ig-comment-001",
+    "threads": "threads-reply-001",
 }
 
 
@@ -134,18 +141,44 @@ class LocalFixtureCommentAdapter:
         self.composer_was_empty_before_fill: bool | None = None
         self.submit_clicks = 0
         self.visible_own_replies: list[str] = []
+        self.last_preparation_id: str | None = None
 
-    def one(self, attribute: str) -> HtmlNode:
+    def global_one(self, attribute: str) -> HtmlNode:
         matches = [node for node in walk(self.nodes) if attribute in node.attrs]
         if len(matches) != 1:
             raise AssertionError(f"fixture expected one {attribute}, found {len(matches)}")
         return matches[0]
 
+    def target(self) -> HtmlNode:
+        expected_id = EXPECTED_COMMENT_IDS[self.spec.platform]
+        matches = [
+            node for node in walk(self.nodes)
+            if node.attrs.get(self.spec.comment_id_attr) == expected_id
+        ]
+        if len(matches) != 1:
+            raise AssertionError(
+                f"fixture expected one target {expected_id}, found {len(matches)}"
+            )
+        return matches[0]
+
+    def one(self, attribute: str) -> HtmlNode:
+        target = self.target()
+        matches = [
+            node for node in (target, *walk(target.children))
+            if attribute in node.attrs
+        ]
+        if len(matches) != 1:
+            raise AssertionError(
+                f"fixture target expected one {attribute}, found {len(matches)}"
+            )
+        return matches[0]
+
     def has(self, attribute: str) -> bool:
-        return any(attribute in node.attrs for node in walk(self.nodes))
+        target = self.target()
+        return any(attribute in node.attrs for node in (target, *walk(target.children)))
 
     def scan(self) -> dict:
-        root = self.one("data-fixture-origin")
+        root = self.global_one("data-fixture-origin")
         if root.attrs["data-fixture-origin"] != "local-only":
             raise ValueError("adapter fixture is not marked local-only")
         if root.attrs.get("data-platform") != self.spec.platform:
@@ -239,8 +272,9 @@ class LocalFixtureCommentAdapter:
     ) -> dict:
         scanned, account_ok, post_ok = self._scope_flags(action)
         target_ok = self._target_verified(action, scanned)
-        return {
+        receipt = {
             "schema_version": 1,
+            "test_only": False,
             "action_id": action["action_id"],
             "intent_id": action["intent_id"],
             "session_id": action["session_id"],
@@ -248,8 +282,14 @@ class LocalFixtureCommentAdapter:
             "scope": action["scope"],
             "comment_fingerprint": action["comment_fingerprint"],
             "reply_hash": action["reply_hash"],
+            "action_digest": _json_digest(action),
+            "plan_digest": _json_digest({"local_fixture_plan": self.spec.platform}),
             "observed_url": observed_url or action["post_permalink"],
             "observed_at": observed_at,
+            "baseline_exact_reply_count": sum(
+                1 for item in self.visible_own_replies if item == action["reply_text"]
+            ),
+            "baseline_total_reply_count": len(self.visible_own_replies),
             "account_verified": account_ok,
             "post_verified": post_ok,
             "target_verified": target_ok,
@@ -259,6 +299,14 @@ class LocalFixtureCommentAdapter:
             "reply_control_verified": self.has(self.spec.submit_attr),
             "evidence": f"local {self.spec.platform} fixture preflight derived from DOM state",
         }
+        receipt["preparation_id"] = _json_digest({
+            key: receipt[key] for key in (
+                "action_digest", "plan_digest", "observed_url", "observed_at",
+                "baseline_exact_reply_count", "baseline_total_reply_count", "test_only",
+            )
+        })
+        self.last_preparation_id = receipt["preparation_id"]
+        return receipt
 
     def result_receipt(
         self, action: dict, preflight_id: str, observed_at: str,
@@ -266,10 +314,18 @@ class LocalFixtureCommentAdapter:
         scanned, account_ok, post_ok = self._scope_flags(action)
         target_ok = self._target_verified(action, scanned)
         exact = self.composer_text in self.visible_own_replies
+        preparation_id = self.last_preparation_id
+        if not preparation_id:
+            raise AssertionError("result receipt requires a prior preflight receipt")
         return {
             "schema_version": 1,
+            "test_only": False,
             "action_id": action["action_id"],
             "preflight_id": preflight_id,
+            "preparation_id": preparation_id,
+            "claim_id": stable_id(
+                "browser-submit-claim", action["action_id"], preflight_id, preparation_id,
+            ),
             "intent_id": action["intent_id"],
             "session_id": action["session_id"],
             "scope": action["scope"],
@@ -285,12 +341,13 @@ class LocalFixtureCommentAdapter:
             "parent_verified": post_ok and target_ok,
             "exact_reply_visible": exact,
             "own_author_verified": exact,
+            "post_submit_total_reply_count": len(self.visible_own_replies),
             "evidence": f"local {self.spec.platform} fixture result derived from click state",
         }
 
 
 def stage_cli_send(adapter: LocalFixtureCommentAdapter, root: Path) -> tuple[Path, str, dict]:
-    script, source = prepare_cli_fixture(root)
+    script, source = prepare_cli_fixture(root, live_browser_actuation_enabled=True)
     scanned = adapter.scan()
     if scanned["body"] != EXPECTED_BODIES[adapter.spec.platform]:
         raise AssertionError(f"{adapter.spec.platform} adapter extracted the wrong body")

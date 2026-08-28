@@ -61,7 +61,10 @@ def validate_policy(policy: dict[str, Any], errors: list[str]) -> None:
     max_chars = policy.get("maximum_reply_characters")
     if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 1:
         errors.append("comment policy maximum_reply_characters must be a positive integer")
-    for name in ("allow_external_links_auto", "allow_private_messages", "allow_media_replies"):
+    for name in (
+        "live_browser_actuation_enabled", "allow_external_links_auto",
+        "allow_private_messages", "allow_media_replies",
+    ):
         if not isinstance(policy.get(name), bool):
             errors.append(f"comment policy {name} must be boolean")
 

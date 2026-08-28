@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "release_version": "2.5.0",
+  "source_revision_basis": "release-tag:v2.5.0",
+  "required_obligation_ids": [
+    "COMMENT_SCAN_LEDGER",
+    "COMMENT_WRITE_AUTHORIZATION",
+    "CHROME_ACTUATOR_CONTRACT",
+    "THREE_PLATFORM_BROWSER_FIXTURE",
+    "THREE_PLATFORM_LIVE_DRAFT",
+    "LIVE_BATCH_CONFIRM",
+    "LIVE_BOUNDED_AUTO"
+  ],
+  "obligations": [
+    {
+      "id": "COMMENT_SCAN_LEDGER",
+      "name": "Scoped scans persist completion and zero-result evidence",
+      "status": "verified",
+      "integration_level": "contract_enforced",
+      "scope": ["internal"],
+      "verified_version": "2.5.0",
+      "evidence": [
+        "python scripts/comment_self_test.py",
+        "scripts/comment_test_browser_contract.py"
+      ]
+    },
+    {
+      "id": "COMMENT_WRITE_AUTHORIZATION",
+      "name": "Every external reply needs a bounded grant or approval and one-shot permit",
+      "status": "verified",
+      "integration_level": "contract_enforced",
+      "scope": ["internal"],
+      "verified_version": "2.5.0",
+      "evidence": [
+        "python scripts/comment_self_test.py",
+        "scripts/comment_test_authorization.py",
+        "scripts/comment_test_browser_contract.py"
+      ]
+    },
+    {
+      "id": "CHROME_ACTUATOR_CONTRACT",
+      "name": "Test-only Chrome actuator contract binds parent, preparation, durable claim, and exactly-once submit",
+      "status": "verified",
+      "integration_level": "contract_enforced",
+      "scope": ["internal"],
+      "verified_version": "2.5.0",
+      "evidence": [
+        "node scripts/comment_chrome_actuator_test.mjs",
+        "node scripts/comment_chrome_claim_bridge_test.mjs",
+        "node scripts/comment_chrome_claim_integration_test.mjs",
+        "python scripts/comment_self_test.py",
+        "scripts/comment_test_browser_policy_gate.py",
+        "scripts/comment_chrome_send.mjs",
+        "scripts/comment_chrome_claim_bridge.mjs"
+      ],
+      "live_browser_actuation_enabled_by_default": false,
+      "limitation": "Verification is isolated contract evidence; release policy rejects live scan completion and send lifecycle mutations."
+    },
+    {
+      "id": "THREE_PLATFORM_BROWSER_FIXTURE",
+      "name": "FB, IG, and Threads run through a real controlled browser fixture",
+      "status": "blocked_external",
+      "integration_level": "unmeasured",
+      "scope": ["internal"],
+      "owner": "User-controlled Chrome and Browser extension",
+      "condition": "Chrome is not connected to a controlled backend, and release policy keeps live browser ledger mutation disabled by default",
+      "live_browser_actuation_enabled_by_default": false,
+      "next_action": "Open Chrome, reconnect the controlled backend, and run comment_fixture_browser_e2e.mjs for all three fixtures"
+    },
+    {
+      "id": "THREE_PLATFORM_LIVE_DRAFT",
+      "name": "Authenticated FB, IG, and Threads scans produce same-revision draft queues",
+      "status": "blocked_external",
+      "integration_level": "unmeasured",
+      "scope": ["internal"],
+      "owner": "User-controlled logged-in Chrome",
+      "condition": "Chrome must be open and signed in with one authorized test-post permalink per platform; live browser scan completion is also disabled by release policy until controlled canaries pass",
+      "live_browser_actuation_enabled_by_default": false,
+      "next_action": "Run a read-only draft_only canary on each platform and retain ledger receipts"
+    },
+    {
+      "id": "LIVE_BATCH_CONFIRM",
+      "name": "A confirmed reply is sent and verified under the correct live parent",
+      "status": "blocked_external",
+      "integration_level": "unmeasured",
+      "scope": ["internal"],
+      "owner": "User approval and logged-in Chrome",
+      "condition": "A test comment and current-session batch confirmation are available, but live begin, click, finish, and reconcile remain disabled by release policy",
+      "live_browser_actuation_enabled_by_default": false,
+      "next_action": "Send one approved canary per platform and verify exact own-account reply placement"
+    },
+    {
+      "id": "LIVE_BOUNDED_AUTO",
+      "name": "A current-session bounded_auto grant completes without exceeding its cap",
+      "status": "blocked_external",
+      "integration_level": "unmeasured",
+      "scope": ["internal"],
+      "owner": "User authorization and logged-in Chrome",
+      "condition": "The user explicitly grants a platform, account, post, TTL, and maximum action count; the separate release kill switch still remains disabled",
+      "live_browser_actuation_enabled_by_default": false,
+      "next_action": "Run one low-risk allowlisted canary, then verify cap, dedupe, and circuit-breaker behavior"
+    }
+  ]
+}

@@ -10,13 +10,24 @@ from pathlib import Path
 from typing import Any
 
 from comment_browser_contract import (
-    build_browser_action, build_browser_scan_request, classify_browser_reinspection,
-    classify_browser_result, normalize_browser_scan, validate_browser_preflight,
+    build_browser_action, build_browser_scan_completion, build_browser_scan_request,
+    classify_browser_reinspection, classify_browser_result, normalize_browser_scan,
+    validate_browser_preflight,
 )
 from comment_cli_support import (
     SKILL_ROOT, commit_or_preview, load_state, now_iso, read_json_source, require_valid,
 )
 from comment_domain import normalize_reply_event, stable_id
+
+
+def _require_live_browser_mutation_enabled(
+    policy: dict[str, Any], args: argparse.Namespace, operation: str,
+) -> None:
+    """Fail closed before a live Chrome receipt can mutate the canonical ledger."""
+    if args.write and policy.get("live_browser_actuation_enabled") is not True:
+        raise ValueError(
+            f"{operation} live browser ledger mutation is disabled by policy"
+        )
 
 
 def _append_scan_rows(
@@ -73,6 +84,7 @@ def command_browser_scan(args: argparse.Namespace) -> None:
     raw = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
+    _require_live_browser_mutation_enabled(policy, args, "browser-scan")
     request = result["browser_scan_requests"].get(args.scan_request_id)
     if not request:
         raise ValueError(f"unknown browser scan request {args.scan_request_id}")
@@ -82,9 +94,21 @@ def command_browser_scan(args: argparse.Namespace) -> None:
     added, unchanged = _append_scan_rows(
         records, result["latest_comments"], scan["comments"],
     )
+    completion = build_browser_scan_completion(
+        scan, request, raw.get("thread_expansion_evidence"),
+    )
+    known_completion_ids = {
+        row.get("completion_event_id")
+        for row in request.get("completion_events", [])
+    }
+    completion_status = "unchanged"
+    if completion["completion_event_id"] not in known_completion_ids:
+        records["scan_requests"].append(completion)
+        completion_status = "appended"
     payload = {
         "scan_id": scan["scan_id"], "scope": scan["scope"],
-        "added": added, "unchanged": unchanged,
+        "added": added, "unchanged": unchanged, "completion": completion,
+        "completion_status": completion_status,
     }
     commit_or_preview(
         records, policy, result["revision"], payload,
@@ -106,6 +130,7 @@ def command_browser_begin(args: argparse.Namespace) -> None:
     raw = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
+    _require_live_browser_mutation_enabled(policy, args, "browser-begin")
     preflight = validate_browser_preflight(
         raw, result["latest_comments"], result["reply_states"], policy,
         args.intent_id, args.session_id,
@@ -125,14 +150,37 @@ def command_browser_begin(args: argparse.Namespace) -> None:
         "scope": permit["scope"],
         "browser_action_id": preflight["action_id"],
         "browser_preflight_id": preflight["preflight_id"],
+        "browser_preparation_id": preflight["preparation_id"],
+        "browser_action_digest": preflight["action_digest"],
+        "browser_plan_digest": preflight["plan_digest"],
         "browser_preflight_evidence": preflight["evidence"],
+        "browser_baseline_total_reply_count": preflight["baseline_total_reply_count"],
     }, result["latest_comments"])
+    claim = {
+        "decision": "WRITE_OK",
+        "claim_id": stable_id(
+            "browser-submit-claim", preflight["action_id"],
+            preflight["preflight_id"], preflight["preparation_id"],
+        ),
+        "preflight_id": preflight["preflight_id"],
+        "action_id": preflight["action_id"],
+        "intent_id": args.intent_id,
+        "session_id": args.session_id,
+        "permit_id": permit["permit_id"],
+        "reply_hash": state["draft"]["reply_hash"],
+        "action_digest": preflight["action_digest"],
+        "plan_digest": preflight["plan_digest"],
+        "preparation_id": preflight["preparation_id"],
+    }
+    event["browser_submit_claim_id"] = claim["claim_id"]
     records["replies"].append(event)
-    commit_or_preview(
+    revision = commit_or_preview(
         records, policy, result["revision"],
         {"preflight_id": preflight["preflight_id"], "event": event},
         root=args.root, write=args.write,
     )
+    if revision is not None:
+        print("SUBMIT_CLAIM " + json.dumps(claim, ensure_ascii=False, separators=(",", ":")))
 
 
 def _finish_event(
@@ -161,6 +209,7 @@ def command_browser_finish(args: argparse.Namespace) -> None:
     raw = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
+    _require_live_browser_mutation_enabled(policy, args, "browser-finish")
     outcome = classify_browser_result(
         raw, result["latest_comments"], result["reply_states"], policy,
         args.intent_id, args.session_id,
@@ -191,6 +240,7 @@ def command_browser_reconcile(args: argparse.Namespace) -> None:
     raw = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
+    _require_live_browser_mutation_enabled(policy, args, "browser-reconcile")
     outcome = classify_browser_reinspection(
         raw, result["latest_comments"], result["reply_states"], policy,
         args.intent_id, args.session_id,
