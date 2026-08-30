@@ -30,6 +30,8 @@
   "maximum_browser_scan_age_seconds": 300,
   "maximum_browser_preflight_age_seconds": 60,
   "maximum_browser_result_age_seconds": 300,
+  "maximum_browser_finish_capability_ttl_seconds": 300,
+  "maximum_browser_reconcile_capability_ttl_seconds": 86400,
   "maximum_reply_characters": 500,
   "allow_external_links_auto": false,
   "allow_private_messages": false,

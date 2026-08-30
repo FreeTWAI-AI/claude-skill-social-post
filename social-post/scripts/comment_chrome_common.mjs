@@ -194,8 +194,13 @@ export async function verifyEvidence(locator, spec, expected, label, ownership =
 
 export async function readComposer(composer) {
   return normalizedText(await composer.evaluate((element) => {
+    const contentEditable = typeof element.getAttribute === "function"
+      ? element.getAttribute("contenteditable") : null;
+    const usesEditableText = element.isContentEditable === true
+      || (typeof contentEditable === "string"
+        && contentEditable.toLowerCase() !== "false");
+    if (usesEditableText) return element.innerText ?? element.textContent;
     if ("value" in element) return element.value;
-    if (element.isContentEditable) return element.innerText;
     return element.textContent;
   }));
 }
@@ -250,41 +255,6 @@ export async function matchingOwnReplies(
     own_author_count: ownAuthorCount,
     snapshot_digest: digestObject({ total, entries }, "reply evidence snapshot"),
   };
-}
-
-export async function requireCompleteReplySet(
-  tab, target, plan, replyText, ownAuthor, ownership,
-) {
-  await verifyExpansionComplete(tab, target, plan.replyExpansionControls, "reply thread expansion");
-  const first = await matchingOwnReplies(
-    tab, target, plan, replyText, ownAuthor, ownership,
-  );
-  if (first.end_total !== first.total) {
-    fail(`reply evidence count drifted during inspection: ${first.total} to ${first.end_total}`);
-  }
-  if (first.inspectable !== first.total) {
-    fail(`reply evidence is incomplete: ${first.inspectable} of ${first.total} items are inspectable`);
-  }
-  await verifyExpansionComplete(tab, target, plan.replyExpansionControls, "reply thread expansion");
-  const found = await matchingOwnReplies(
-    tab, target, plan, replyText, ownAuthor, ownership,
-  );
-  if (found.end_total !== found.total) {
-    fail(`reply evidence count drifted during stability scan: ${found.total} to ${found.end_total}`);
-  }
-  if (found.inspectable !== found.total) {
-    fail(`reply evidence is incomplete: ${found.inspectable} of ${found.total} items are inspectable`);
-  }
-  await verifyExpansionComplete(tab, target, plan.replyExpansionControls, "reply thread expansion");
-  const finalTotal = await locate(tab, target, plan.replyItems).count();
-  if (finalTotal !== found.total) {
-    fail(`reply evidence count drifted after inspection: ${found.total} to ${finalTotal}`);
-  }
-  await verifyExpansionComplete(tab, target, plan.replyExpansionControls, "reply thread expansion");
-  if (first.total !== found.total || first.snapshot_digest !== found.snapshot_digest) {
-    fail("reply evidence changed during stability verification");
-  }
-  return found;
 }
 
 export function receiptTestOnly(options = {}) {

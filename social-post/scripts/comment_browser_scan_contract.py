@@ -8,9 +8,18 @@ from typing import Any
 from comment_browser_common import (
     PLATFORM_HOSTS, _canonical_url, _require_comment_permalink_for_post,
     _require_platform_url, _require_post_url, _require_recent_observation,
-    _require_live_receipt, _require_schema_version, _required_boolean, _required_string,
+    _json_digest, _require_live_receipt, _require_schema_version, _required_boolean,
+    _required_string,
 )
 from comment_domain import normalize_comment, stable_id
+from comment_scan_provenance import (
+    SCAN_PROVENANCE_DIGEST_FIELD,
+    build_scan_capability_binding,
+    build_scan_provenance,
+    normalize_scan_capability_metadata,
+    normalize_scan_receipt_consumption,
+    validate_scan_provenance,
+)
 from social_validation import parse_time
 
 
@@ -45,12 +54,18 @@ def normalize_browser_scan_request(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("browser scan request id does not match its immutable fields")
     if raw.get("authorization_basis") != "current_session_user_instruction":
         raise ValueError("browser scan request lacks current-session authorization basis")
-    return {
+    capability_metadata = normalize_scan_capability_metadata(raw)
+    result = {
         "schema_version": 1, "scan_request_id": expected_id,
         "session_id": session_id, "requested_at": requested_at,
         "expires_at": expires_at, "authorization_basis": raw["authorization_basis"],
-        **scope,
+        **scope, **capability_metadata,
     }
+    if capability_metadata and _json_digest(build_scan_capability_binding(result)) != (
+        capability_metadata["browser_scan_capability_binding_digest"]
+    ):
+        raise ValueError("browser scan capability binding differs from request fields")
+    return result
 
 
 def build_browser_scan_request(
@@ -102,6 +117,11 @@ def replay_browser_scan_requests(
                 errors.append(
                     f"browser scan request row {index}: completion references "
                     "an unknown or not-yet-recorded scan_request_id"
+                )
+                continue
+            if request["completion_events"]:
+                errors.append(
+                    f"browser scan request row {index}: one-shot scan request already completed"
                 )
                 continue
             try:
@@ -222,6 +242,13 @@ def normalize_browser_scan_completion(
     expansion = _require_complete_thread_expansion(
         raw.get("thread_expansion_evidence"), "browser scan completion",
     )
+    test_only = raw.get("test_only")
+    if not isinstance(test_only, bool):
+        raise ValueError("browser scan completion test_only must be explicit boolean")
+    consumption = normalize_scan_receipt_consumption(
+        raw, clean_request,
+        required=(test_only is False and bool(normalize_scan_capability_metadata(clean_request))),
+    )
     immutable = {
         "schema_version": 1,
         "event_type": SCAN_COMPLETION_EVENT_TYPE,
@@ -231,8 +258,30 @@ def normalize_browser_scan_completion(
         "observed_at": observed_at,
         "comment_count": comment_count,
         "zero_result": zero_result,
+        "test_only": test_only,
         "thread_expansion_evidence": expansion,
+        **consumption,
     }
+    raw_provenance = raw.get("scan_provenance")
+    raw_provenance_digest = raw.get(SCAN_PROVENANCE_DIGEST_FIELD)
+    if raw_provenance is not None or raw_provenance_digest is not None:
+        provenance = validate_scan_provenance(raw_provenance)
+        if raw_provenance_digest != provenance["provenance_digest"]:
+            raise ValueError("browser scan completion provenance digest differs")
+        if provenance.get("scan_request_id") != clean_request["scan_request_id"]:
+            raise ValueError("browser scan completion provenance request differs")
+        if provenance.get("scope") != expected_scope:
+            raise ValueError("browser scan completion provenance scope differs")
+        if provenance.get("observed_at") != observed_at:
+            raise ValueError("browser scan completion provenance time differs")
+        scan_id = _required_string(raw, "scan_id")
+        if provenance.get("scan_id") != scan_id:
+            raise ValueError("browser scan completion provenance scan_id differs")
+        immutable.update({
+            "scan_id": scan_id,
+            "scan_provenance": provenance,
+            SCAN_PROVENANCE_DIGEST_FIELD: raw_provenance_digest,
+        })
     expected_id = stable_id("browser-scan-completion", immutable)
     supplied_id = raw.get("completion_event_id")
     if supplied_id not in (None, expected_id):
@@ -242,6 +291,7 @@ def normalize_browser_scan_completion(
 
 def build_browser_scan_completion(
     scan: dict[str, Any], request: dict[str, Any], raw_evidence: Any,
+    receipt_consumption: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the durable completion event for an accepted browser scan."""
     provisional = {
@@ -253,8 +303,16 @@ def build_browser_scan_completion(
         "observed_at": scan["observed_at"],
         "comment_count": len(scan["comments"]),
         "zero_result": not scan["comments"],
+        "test_only": scan["test_only"],
         "thread_expansion_evidence": raw_evidence,
+        **(receipt_consumption or {}),
     }
+    if scan.get("scan_provenance") is not None:
+        provisional.update({
+            "scan_id": scan["scan_id"],
+            "scan_provenance": scan["scan_provenance"],
+            SCAN_PROVENANCE_DIGEST_FIELD: scan[SCAN_PROVENANCE_DIGEST_FIELD],
+        })
     return normalize_browser_scan_completion(provisional, request)
 
 
@@ -372,15 +430,42 @@ def normalize_browser_scan(
     normalized = [
         _normalize_scanned_comment(row, scope, observed_at) for row in comments
     ]
-    return {
+    scan_id = stable_id(
+        "browser-scan", request["scan_request_id"], scope, observed_at,
+        [row["raw_fingerprint"] for row in normalized],
+    )
+    observed_url = _canonical_url(_required_string(raw, "observed_url"))
+    provenance = build_scan_provenance(
+        raw, scan_id=scan_id, scope=scope, observed_url=observed_url,
+        observed_at=observed_at, comments=normalized,
+    )
+    if provenance is not None:
+        bound_comments = []
+        for row in normalized:
+            rebound = normalize_comment({
+                **row,
+                "event_id": None,
+                "scan_provenance": provenance,
+                SCAN_PROVENANCE_DIGEST_FIELD: provenance["provenance_digest"],
+            })
+            rebound["observed_parent_post_permalink"] = row[
+                "observed_parent_post_permalink"
+            ]
+            bound_comments.append(rebound)
+        normalized = bound_comments
+    result = {
         "schema_version": 1,
+        "test_only": raw["test_only"],
         "scan_request_id": request["scan_request_id"],
-        "scan_id": stable_id(
-            "browser-scan", request["scan_request_id"], scope, observed_at,
-            [row["raw_fingerprint"] for row in normalized],
-        ),
+        "scan_id": scan_id,
         "scope": scope,
-        "observed_url": _canonical_url(_required_string(raw, "observed_url")),
+        "observed_url": observed_url,
         "observed_at": observed_at,
         "comments": normalized,
     }
+    if provenance is not None:
+        result.update({
+            "scan_provenance": provenance,
+            SCAN_PROVENANCE_DIGEST_FIELD: provenance["provenance_digest"],
+        })
+    return result

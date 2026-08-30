@@ -19,9 +19,11 @@ from comment_test_browser_contract_support import (
     intent_state,
     preflight_for,
     prepare_action,
+    provenance_envelope,
     reinspection_for,
     result_for,
     scan_envelope,
+    scan_provenance_envelope,
     write_json,
 )
 from comment_test_cli import draft_cli_fixture, prepare_cli_fixture, run_cli
@@ -84,7 +86,7 @@ def check_browser_scan_default_denied() -> None:
         request = create_scan_request(script, root, envelope)
         envelope = bind_scan_request(envelope, request)
         source = root / "browser-scan-disabled.json"
-        write_json(source, envelope)
+        write_json(source, scan_provenance_envelope(root, request, envelope))
         args = ("browser-scan", str(source), *browser_scan_args(request))
         preview = run_cli(script, root, *args)
         if "DRY_RUN valid" not in preview.stdout:
@@ -116,10 +118,12 @@ def check_browser_finish_default_denied() -> None:
         adapter.click_submit("verified")
         current = intent_state(root, action["intent_id"])
         source = root / "browser-finish-disabled.json"
-        write_json(
-            source,
-            result_for(action, adapter, current["attempt"]["browser_preflight_id"]),
+        receipt = result_for(
+            action, adapter, current["attempt"]["browser_preflight_id"],
         )
+        write_json(source, provenance_envelope(
+            root, action["intent_id"], "browser-finish", receipt,
+        ))
         args = (
             "browser-finish", str(source), "--intent-id", action["intent_id"],
             "--session-id", SESSION_ID,
@@ -139,10 +143,13 @@ def check_browser_reconcile_default_denied() -> None:
         finish_browser_send(script, root, action, adapter)
         current = intent_state(root, action["intent_id"])
         source = root / "browser-reconcile-disabled.json"
-        write_json(source, reinspection_for(action, current["attempt"], found=False))
+        receipt = reinspection_for(action, current["attempt"], found=False)
+        write_json(source, provenance_envelope(
+            root, action["intent_id"], "browser-reconcile", receipt,
+        ))
         args = (
             "browser-reconcile", str(source), "--intent-id", action["intent_id"],
-            "--session-id", "session-reinspect",
+            "--session-id", SESSION_ID,
         )
         if "DRY_RUN valid" not in run_cli(script, root, *args).stdout:
             raise AssertionError("disabled browser-reconcile was not available as a safe preview")
@@ -155,4 +162,3 @@ def run_browser_policy_gate_tests() -> None:
     check_browser_begin_default_denied()
     check_browser_finish_default_denied()
     check_browser_reconcile_default_denied()
-

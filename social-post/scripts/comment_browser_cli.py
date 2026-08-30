@@ -14,10 +14,21 @@ from comment_browser_contract import (
     classify_browser_reinspection, classify_browser_result, normalize_browser_scan,
     validate_browser_preflight,
 )
+from comment_browser_provenance import (
+    build_receipt_binding, consume_receipt_envelope, issue_receipt_capability,
+    issue_reconcile_receipt_capability, reconcile_receipt_binding_from_issuer,
+)
 from comment_cli_support import (
     SKILL_ROOT, commit_or_preview, load_state, now_iso, read_json_source, require_valid,
 )
 from comment_domain import normalize_reply_event, stable_id
+from comment_scan_provenance import (
+    ACTION_PROVENANCE_DIGEST_FIELD,
+    DRAFT_PROVENANCE_DIGEST_FIELD,
+    SCAN_PROVENANCE_DIGEST_FIELD,
+    consume_scan_receipt_envelope,
+    issue_scan_receipt_capability,
+)
 
 
 def _require_live_browser_mutation_enabled(
@@ -71,17 +82,26 @@ def command_browser_scan_request(args: argparse.Namespace) -> None:
         post_permalink=args.post_permalink, session_id=args.session_id,
         requested_at=requested_at, expires_at=expires_at,
     )
+    receipt_capability, capability_metadata = issue_scan_receipt_capability(request)
+    request = {**request, **capability_metadata}
     if request["scan_request_id"] in result["browser_scan_requests"]:
         raise ValueError("duplicate browser scan request")
     records["scan_requests"].append(request)
-    commit_or_preview(
+    revision = commit_or_preview(
         records, policy, result["revision"], request,
         root=args.root, write=args.write,
     )
+    if revision is not None and args.internal_fused:
+        print("INTERNAL_SCAN_CAPABILITY " + json.dumps({
+            "schema_version": 1,
+            "decision": "SCAN_AUTHORIZED",
+            "scan_request": request,
+            "receipt_capability": receipt_capability,
+        }, ensure_ascii=False, separators=(",", ":")))
 
 
 def command_browser_scan(args: argparse.Namespace) -> None:
-    raw = read_json_source(args.source)
+    source_value = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
     _require_live_browser_mutation_enabled(policy, args, "browser-scan")
@@ -90,30 +110,51 @@ def command_browser_scan(args: argparse.Namespace) -> None:
         raise ValueError(f"unknown browser scan request {args.scan_request_id}")
     if request["session_id"] != args.session_id:
         raise ValueError("browser scan session differs from stored scan request")
+    if request.get("completion_events"):
+        raise ValueError("browser-scan one-shot request already completed")
+    receipt_consumption = None
+    if isinstance(source_value, dict) and set(source_value) == {"provenance", "receipt"}:
+        raw, receipt_consumption = consume_scan_receipt_envelope(
+            source_value, request,
+        )
+    else:
+        if not isinstance(source_value, dict) or source_value.get("test_only") is not True:
+            raise ValueError(
+                "browser-scan live receipt requires a one-shot provenance envelope"
+            )
+        raw = source_value
     scan = normalize_browser_scan(raw, policy, request)
     added, unchanged = _append_scan_rows(
         records, result["latest_comments"], scan["comments"],
     )
     completion = build_browser_scan_completion(
-        scan, request, raw.get("thread_expansion_evidence"),
+        scan, request, raw.get("thread_expansion_evidence"), receipt_consumption,
     )
-    known_completion_ids = {
-        row.get("completion_event_id")
-        for row in request.get("completion_events", [])
-    }
-    completion_status = "unchanged"
-    if completion["completion_event_id"] not in known_completion_ids:
-        records["scan_requests"].append(completion)
-        completion_status = "appended"
+    records["scan_requests"].append(completion)
     payload = {
         "scan_id": scan["scan_id"], "scope": scan["scope"],
         "added": added, "unchanged": unchanged, "completion": completion,
-        "completion_status": completion_status,
+        "completion_status": "appended",
     }
-    commit_or_preview(
+    revision = commit_or_preview(
         records, policy, result["revision"], payload,
         root=args.root, write=args.write,
     )
+    if revision is not None:
+        receipt_digest = (
+            receipt_consumption or {}
+        ).get("browser_scan_receipt_digest")
+        print("SCAN_COMMIT " + json.dumps({
+            "schema_version": 1,
+            "operation": "browser-scan",
+            "scan_request_id": request["scan_request_id"],
+            "scan_id": scan["scan_id"],
+            "receipt_digest": receipt_digest,
+            "comment_count": len(scan["comments"]),
+            "added_count": len(added),
+            "unchanged_count": len(unchanged),
+            "zero_result": not scan["comments"],
+        }, ensure_ascii=False, separators=(",", ":")))
 
 
 def command_browser_action(args: argparse.Namespace) -> None:
@@ -138,24 +179,7 @@ def command_browser_begin(args: argparse.Namespace) -> None:
     state = preflight["state"]
     comment = preflight["comment"]
     permit = state["permit"]
-    event = normalize_reply_event({
-        "event_type": "send_started",
-        "intent_id": args.intent_id,
-        "comment_key": preflight["comment_key"],
-        "occurred_at": now_iso(),
-        "session_id": args.session_id,
-        "permit_id": permit["permit_id"],
-        "reply_hash": state["draft"]["reply_hash"],
-        "comment_fingerprint": comment["raw_fingerprint"],
-        "scope": permit["scope"],
-        "browser_action_id": preflight["action_id"],
-        "browser_preflight_id": preflight["preflight_id"],
-        "browser_preparation_id": preflight["preparation_id"],
-        "browser_action_digest": preflight["action_digest"],
-        "browser_plan_digest": preflight["plan_digest"],
-        "browser_preflight_evidence": preflight["evidence"],
-        "browser_baseline_total_reply_count": preflight["baseline_total_reply_count"],
-    }, result["latest_comments"])
+    occurred_at = now_iso()
     claim = {
         "decision": "WRITE_OK",
         "claim_id": stable_id(
@@ -171,8 +195,40 @@ def command_browser_begin(args: argparse.Namespace) -> None:
         "action_digest": preflight["action_digest"],
         "plan_digest": preflight["plan_digest"],
         "preparation_id": preflight["preparation_id"],
+        SCAN_PROVENANCE_DIGEST_FIELD: preflight[SCAN_PROVENANCE_DIGEST_FIELD],
+        DRAFT_PROVENANCE_DIGEST_FIELD: preflight[DRAFT_PROVENANCE_DIGEST_FIELD],
+        ACTION_PROVENANCE_DIGEST_FIELD: preflight[ACTION_PROVENANCE_DIGEST_FIELD],
     }
-    event["browser_submit_claim_id"] = claim["claim_id"]
+    event_payload = {
+        "event_type": "send_started",
+        "intent_id": args.intent_id,
+        "comment_key": preflight["comment_key"],
+        "occurred_at": occurred_at,
+        "session_id": args.session_id,
+        "permit_id": permit["permit_id"],
+        "reply_hash": state["draft"]["reply_hash"],
+        "comment_fingerprint": comment["raw_fingerprint"],
+        "scope": permit["scope"],
+        "browser_action_id": preflight["action_id"],
+        "browser_preflight_id": preflight["preflight_id"],
+        "browser_preparation_id": preflight["preparation_id"],
+        "browser_action_digest": preflight["action_digest"],
+        "browser_plan_digest": preflight["plan_digest"],
+        "browser_preflight_evidence": preflight["evidence"],
+        "browser_baseline_total_reply_count": preflight["baseline_total_reply_count"],
+        "browser_submit_claim_id": claim["claim_id"],
+        SCAN_PROVENANCE_DIGEST_FIELD: preflight[SCAN_PROVENANCE_DIGEST_FIELD],
+        DRAFT_PROVENANCE_DIGEST_FIELD: preflight[DRAFT_PROVENANCE_DIGEST_FIELD],
+        ACTION_PROVENANCE_DIGEST_FIELD: preflight[ACTION_PROVENANCE_DIGEST_FIELD],
+    }
+    finish_binding = build_receipt_binding("browser-finish", event_payload)
+    finish_capability, capability_metadata = issue_receipt_capability(
+        "browser-finish", finish_binding, occurred_at,
+        int(policy.get("maximum_browser_finish_capability_ttl_seconds", 300)),
+    )
+    event_payload.update(capability_metadata)
+    event = normalize_reply_event(event_payload, result["latest_comments"])
+    claim["receipt_capability"] = finish_capability
     records["replies"].append(event)
     revision = commit_or_preview(
         records, policy, result["revision"],
@@ -185,7 +241,8 @@ def command_browser_begin(args: argparse.Namespace) -> None:
 
 def _finish_event(
     outcome: dict[str, Any], intent_id: str, session_id: str,
-    comment_key: str, attempt_session_id: str,
+    comment_key: str, attempt_session_id: str, provenance: dict[str, Any],
+    next_capability_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     mapping = {"sent": "sent_verified", "unknown": "needs_reconcile", "failed": "failed"}
     event_type = mapping[outcome["result"]]
@@ -200,68 +257,186 @@ def _finish_event(
         "browser_observed_at": outcome.get("observed_at"),
         "reason_code": outcome.get("reason") if event_type == "needs_reconcile" else None,
         "submission_possible": False if event_type == "failed" else None,
-        "browser_receipt_id": stable_id("browser-receipt", intent_id, outcome),
+        "browser_receipt_id": stable_id(
+            "browser-receipt", intent_id, provenance["browser_receipt_digest"],
+        ),
+        **provenance,
     }
+    if next_capability_metadata:
+        event.update(next_capability_metadata)
     return event
 
 
+def _active_intent(
+    states: dict[str, dict[str, Any]], intent_id: str,
+) -> tuple[str, dict[str, Any]]:
+    matches = [
+        (key, state) for key, state in states.items()
+        if state.get("intent_id") == intent_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"expected one active intent_id {intent_id}")
+    return matches[0]
+
+
+def _emit_receipt_commit(
+    operation: str, outcome: dict[str, Any], provenance: dict[str, Any],
+    next_capability: dict[str, Any] | None,
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "operation": operation,
+        "outcome": outcome["result"],
+        "receipt_digest": provenance["browser_receipt_digest"],
+        "next_capability": next_capability,
+    }
+    print("RECEIPT_COMMIT " + json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"),
+    ))
+
+
+def _emit_internal_reconcile_recovery(
+    event: dict[str, Any], attempt: dict[str, Any], capability: dict[str, Any],
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "decision": "RECONCILE_ONLY",
+        "operation": "browser-reconcile",
+        "intent_id": event["intent_id"],
+        "action_id": attempt["browser_action_id"],
+        "claim_id": attempt["browser_submit_claim_id"],
+        "preflight_id": attempt["browser_preflight_id"],
+        "preparation_id": attempt["browser_preparation_id"],
+        "attempt_session_id": event["attempt_session_id"],
+        "recovery_session_id": event["session_id"],
+        "receipt_capability": capability,
+    }
+    print("INTERNAL_RECOVERY_CAPABILITY " + json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"),
+    ))
+
+
+def command_browser_recover_reconcile(args: argparse.Namespace) -> None:
+    """Rotate lost/expired receipt authority without creating another send claim."""
+    records, policy, result = load_state(args.root)
+    require_valid(result)
+    _require_live_browser_mutation_enabled(
+        policy, args, "browser-recover-reconcile",
+    )
+    comment_key, state = _active_intent(result["reply_states"], args.intent_id)
+    if state.get("status") not in {"send_started", "needs_reconcile"}:
+        raise ValueError(
+            "browser-recover-reconcile requires an authoritative uncertain send, "
+            f"found {state.get('status')}"
+        )
+    attempt = state.get("attempt") or {}
+    attempt_session_id = str(attempt.get("session_id") or "")
+    current_issuer = state.get("reconcile_capability") or state.get("last_event") or {}
+    previous_reconcile_session = current_issuer.get(
+        "browser_reconcile_authorized_session_id"
+    )
+    if args.session_id == attempt_session_id or args.session_id == previous_reconcile_session:
+        raise ValueError(
+            "browser-recover-reconcile requires a fresh current session"
+        )
+    occurred_at = now_iso()
+    capability, metadata = issue_reconcile_receipt_capability(
+        attempt, args.session_id, occurred_at,
+        int(policy.get("maximum_browser_reconcile_capability_ttl_seconds", 86400)),
+    )
+    event = normalize_reply_event({
+        "event_type": "reconcile_recovery_issued",
+        "intent_id": args.intent_id,
+        "comment_key": comment_key,
+        "occurred_at": occurred_at,
+        "session_id": args.session_id,
+        "attempt_session_id": attempt_session_id,
+        "reconciliation_basis": "browser_recovery",
+        "reason_code": args.reason,
+        **metadata,
+    }, result["latest_comments"])
+    records["replies"].append(event)
+    revision = commit_or_preview(
+        records, policy, result["revision"], {"event": event},
+        root=args.root, write=args.write,
+    )
+    if revision is not None:
+        _emit_internal_reconcile_recovery(event, attempt, capability)
+
+
 def command_browser_finish(args: argparse.Namespace) -> None:
-    raw = read_json_source(args.source)
+    envelope = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
     _require_live_browser_mutation_enabled(policy, args, "browser-finish")
+    comment_key, state = _active_intent(result["reply_states"], args.intent_id)
+    attempt = state.get("attempt") or {}
+    if args.session_id != attempt.get("session_id"):
+        raise ValueError("browser-finish session differs from receipt capability session")
+    binding = build_receipt_binding("browser-finish", attempt)
+    raw, provenance = consume_receipt_envelope(
+        envelope, "browser-finish", binding, attempt,
+    )
     outcome = classify_browser_result(
         raw, result["latest_comments"], result["reply_states"], policy,
         args.intent_id, args.session_id,
     )
-    matches = [
-        (key, state) for key, state in result["reply_states"].items()
-        if state.get("intent_id") == args.intent_id
-    ]
-    if len(matches) != 1:
-        raise ValueError(f"expected one active intent_id {args.intent_id}")
-    comment_key, state = matches[0]
-    attempt_session_id = str((state.get("attempt") or {}).get("session_id") or "")
+    attempt_session_id = str(attempt.get("session_id") or "")
+    next_capability = None
+    next_metadata = None
+    if outcome["result"] == "unknown":
+        next_capability, next_metadata = issue_reconcile_receipt_capability(
+            attempt, args.session_id, now_iso(),
+            int(policy.get("maximum_browser_reconcile_capability_ttl_seconds", 86400)),
+        )
     event = normalize_reply_event(
         _finish_event(
             outcome, args.intent_id, args.session_id,
-            comment_key, attempt_session_id,
+            comment_key, attempt_session_id, provenance, next_metadata,
         ),
         result["latest_comments"],
     )
     records["replies"].append(event)
-    commit_or_preview(
+    revision = commit_or_preview(
         records, policy, result["revision"], {"outcome": outcome, "event": event},
         root=args.root, write=args.write,
     )
+    if revision is not None:
+        _emit_receipt_commit("browser-finish", outcome, provenance, next_capability)
 
 
 def command_browser_reconcile(args: argparse.Namespace) -> None:
-    raw = read_json_source(args.source)
+    envelope = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
     _require_live_browser_mutation_enabled(policy, args, "browser-reconcile")
+    comment_key, state = _active_intent(result["reply_states"], args.intent_id)
+    attempt = state.get("attempt") or {}
+    issuer = state.get("reconcile_capability") or state.get("last_event") or {}
+    binding = reconcile_receipt_binding_from_issuer(
+        attempt, issuer, args.session_id,
+    )
+    raw, provenance = consume_receipt_envelope(
+        envelope, "browser-reconcile", binding, issuer,
+    )
     outcome = classify_browser_reinspection(
         raw, result["latest_comments"], result["reply_states"], policy,
         args.intent_id, args.session_id,
     )
+    attempt_session_id = str(attempt.get("session_id") or "")
+    next_capability = None
+    next_metadata = None
     if outcome["result"] == "unknown":
-        print(json.dumps({"outcome": outcome}, ensure_ascii=False, indent=2))
-        print("NO_CHANGE reinspection remains uncertain; do not resend")
-        return
-    matches = [
-        (key, state) for key, state in result["reply_states"].items()
-        if state.get("intent_id") == args.intent_id
-    ]
-    if len(matches) != 1:
-        raise ValueError(f"expected one active intent_id {args.intent_id}")
-    comment_key, state = matches[0]
-    attempt_session_id = str((state.get("attempt") or {}).get("session_id") or "")
-    event = normalize_reply_event({
-        "event_type": (
-            "reconciled_sent" if outcome["result"] == "sent"
-            else "reconciled_not_sent"
-        ),
+        next_capability, next_metadata = issue_reconcile_receipt_capability(
+            attempt, args.session_id, now_iso(),
+            int(policy.get("maximum_browser_reconcile_capability_ttl_seconds", 86400)),
+        )
+    event_payload = {
+        "event_type": {
+            "sent": "reconciled_sent",
+            "not-sent": "reconciled_not_sent",
+            "unknown": "browser_reinspection_observed",
+        }[outcome["result"]],
         "intent_id": args.intent_id,
         "comment_key": comment_key,
         "occurred_at": now_iso(),
@@ -270,13 +445,23 @@ def command_browser_reconcile(args: argparse.Namespace) -> None:
         "reconciliation_basis": "browser_reinspection",
         "browser_evidence": outcome["evidence"],
         "browser_observed_at": outcome["observed_at"],
-        "browser_receipt_id": stable_id("browser-reinspection", args.intent_id, outcome),
-    }, result["latest_comments"])
+        "reason_code": outcome.get("reason"),
+        "browser_receipt_id": stable_id(
+            "browser-reinspection", args.intent_id,
+            provenance["browser_receipt_digest"],
+        ),
+        **provenance,
+    }
+    if next_metadata:
+        event_payload.update(next_metadata)
+    event = normalize_reply_event(event_payload, result["latest_comments"])
     records["replies"].append(event)
-    commit_or_preview(
+    revision = commit_or_preview(
         records, policy, result["revision"], {"outcome": outcome, "event": event},
         root=args.root, write=args.write,
     )
+    if revision is not None:
+        _emit_receipt_commit("browser-reconcile", outcome, provenance, next_capability)
 
 
 def _add_root(parser: argparse.ArgumentParser, *, write: bool) -> None:
@@ -293,6 +478,7 @@ def register_browser_commands(sub: argparse._SubParsersAction) -> None:
     request.add_argument("--post-permalink", required=True)
     request.add_argument("--session-id", required=True)
     request.add_argument("--ttl-minutes", type=int, default=10)
+    request.add_argument("--internal-fused", action="store_true", help=argparse.SUPPRESS)
     _add_root(request, write=True)
     request.set_defaults(handler=command_browser_scan_request)
 
@@ -317,14 +503,27 @@ def register_browser_commands(sub: argparse._SubParsersAction) -> None:
     begin.set_defaults(handler=command_browser_begin)
 
     finish = sub.add_parser("browser-finish")
-    finish.add_argument("source", help="structured live Chrome receipt JSON file or -")
+    finish.add_argument("source", help="versioned provenance envelope JSON file or -")
     finish.add_argument("--intent-id", required=True)
     finish.add_argument("--session-id", required=True)
     _add_root(finish, write=True)
     finish.set_defaults(handler=command_browser_finish)
 
+    recovery = sub.add_parser(
+        "browser-recover-reconcile",
+        help="internal shell-free Node bridge ceremony; not a production user API",
+    )
+    recovery.add_argument("--intent-id", required=True)
+    recovery.add_argument("--session-id", required=True)
+    recovery.add_argument(
+        "--reason", required=True,
+        choices=("browser_process_restarted", "receipt_capability_expired"),
+    )
+    _add_root(recovery, write=True)
+    recovery.set_defaults(handler=command_browser_recover_reconcile)
+
     reconcile = sub.add_parser("browser-reconcile")
-    reconcile.add_argument("source", help="structured fresh Chrome reinspection JSON file or -")
+    reconcile.add_argument("source", help="versioned reinspection provenance envelope JSON file or -")
     reconcile.add_argument("--intent-id", required=True)
     reconcile.add_argument("--session-id", required=True)
     _add_root(reconcile, write=True)

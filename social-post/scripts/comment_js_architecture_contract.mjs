@@ -1,0 +1,253 @@
+/** Exact closed-world contract for the social-post JavaScript architecture gate. */
+
+export const GATE_NAME = "social-post-js-architecture-gate";
+export const SCHEMA_VERSION = 1;
+
+export const INVENTORY_SCOPE = Object.freeze([
+  "scripts/comment_chrome_*.mjs",
+  "scripts/comment_js_architecture_*.mjs",
+  "scripts/comment_fixture_browser_e2e.mjs",
+  "scripts/comment_adapter_fixtures/fixture-runtime.js",
+]);
+
+export const EXPECTED_MODULE_ROLES = Object.freeze({
+  "scripts/comment_adapter_fixtures/fixture-runtime.js": "fixture-runtime",
+  "scripts/comment_chrome_actuator_fixture_test.mjs": "test",
+  "scripts/comment_chrome_actuator_guards_test.mjs": "test",
+  "scripts/comment_chrome_actuator_receipts_test.mjs": "test",
+  "scripts/comment_chrome_actuator_reinspection_test.mjs": "test",
+  "scripts/comment_chrome_actuator_reply_exhaustion_test.mjs": "test",
+  "scripts/comment_chrome_actuator_scan_test.mjs": "test",
+  "scripts/comment_chrome_actuator_send_test.mjs": "test",
+  "scripts/comment_chrome_actuator_test.mjs": "test",
+  "scripts/comment_chrome_actuator.mjs": "production",
+  "scripts/comment_chrome_claim_bridge_test.mjs": "test",
+  "scripts/comment_chrome_claim_bridge.mjs": "production",
+  "scripts/comment_chrome_claim_integration_test.mjs": "test",
+  "scripts/comment_chrome_common.mjs": "production",
+  "scripts/comment_chrome_fixture_evidence_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_fixture_contract_test.mjs": "test",
+  "scripts/comment_chrome_fixture_receipt_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_host_authority_test.mjs": "test",
+  "scripts/comment_chrome_host_authority.mjs": "production",
+  "scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_node_frame_lifecycle_test.mjs": "test",
+  "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_node_frame_mapping_fixture_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_node_frame_mapping.mjs": "production",
+  "scripts/comment_chrome_node_frame_mapping_test.mjs": "test",
+  "scripts/comment_chrome_node_frame_mapping_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_reply_exhaustion.mjs": "production",
+  "scripts/comment_chrome_runtime_authority.mjs": "production",
+  "scripts/comment_chrome_scan_adapters_test.mjs": "test",
+  "scripts/comment_chrome_scan_adapters.mjs": "production",
+  "scripts/comment_chrome_scan_fixture_testonly.mjs": "fixture-testonly",
+  "scripts/comment_chrome_scan.mjs": "production",
+  "scripts/comment_chrome_send_support.mjs": "production",
+  "scripts/comment_chrome_send.mjs": "production",
+  "scripts/comment_fixture_browser_e2e.mjs": "e2e",
+  "scripts/comment_js_architecture_contract.mjs": "tools",
+  "scripts/comment_js_architecture_core.mjs": "tools",
+  "scripts/comment_js_architecture_gate.mjs": "tools",
+  "scripts/comment_js_architecture_loaders.mjs": "tools",
+  "scripts/comment_js_architecture_receipt.mjs": "tools",
+  "scripts/comment_js_architecture_selftest.mjs": "tools",
+});
+
+export const EXPECTED_INVENTORY = Object.freeze(
+  Object.keys(EXPECTED_MODULE_ROLES).sort(),
+);
+
+export const REQUIRED_EDGES = Object.freeze([
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_actuator_scan_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_actuator_send_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_actuator_guards_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_actuator_receipts_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_actuator_reply_exhaustion_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_actuator_reinspection_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_fixture_contract_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_node_frame_lifecycle_test.mjs"],
+  ["scripts/comment_chrome_actuator_test.mjs", "scripts/comment_chrome_node_frame_mapping_test.mjs"],
+  ["scripts/comment_chrome_actuator.mjs", "scripts/comment_chrome_claim_bridge.mjs"],
+  ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_scan.mjs"],
+  ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_send.mjs"],
+  ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_reply_exhaustion.mjs"],
+  ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_send_support.mjs"],
+  ["scripts/comment_chrome_send_support.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_send_support.mjs", "scripts/comment_chrome_reply_exhaustion.mjs"],
+  ["scripts/comment_chrome_reply_exhaustion.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_host_authority_test.mjs", "scripts/comment_chrome_host_authority.mjs"],
+  ["scripts/comment_chrome_host_authority_test.mjs", "scripts/comment_chrome_runtime_authority.mjs"],
+  ["scripts/comment_chrome_host_authority.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_host_authority.mjs", "scripts/comment_chrome_runtime_authority.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs", "scripts/comment_chrome_node_frame_mapping_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_test.mjs", "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_test.mjs", "scripts/comment_chrome_node_frame_mapping_fixture_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_test.mjs", "scripts/comment_chrome_scan_fixture_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_testonly.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_testonly.mjs", "scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_lifecycle_testonly.mjs", "scripts/comment_chrome_node_frame_mapping.mjs"],
+  ["scripts/comment_chrome_node_frame_mapping_fixture_testonly.mjs", "scripts/comment_chrome_scan_fixture_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_mapping.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_node_frame_mapping_test.mjs", "scripts/comment_chrome_node_frame_mapping_fixture_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_mapping_test.mjs", "scripts/comment_chrome_node_frame_mapping_testonly.mjs"],
+  ["scripts/comment_chrome_node_frame_mapping_testonly.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_node_frame_mapping_testonly.mjs", "scripts/comment_chrome_node_frame_mapping.mjs"],
+  ["scripts/comment_chrome_runtime_authority.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_scan.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_scan.mjs", "scripts/comment_chrome_scan_adapters.mjs"],
+  ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_host_authority.mjs"],
+  ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_node_frame_mapping.mjs"],
+  ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs"],
+  ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_node_frame_mapping_testonly.mjs"],
+  ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_scan.mjs"],
+  ["scripts/comment_fixture_browser_e2e.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_fixture_browser_e2e.mjs", "scripts/comment_chrome_fixture_evidence_testonly.mjs"],
+  ["scripts/comment_fixture_browser_e2e.mjs", "scripts/comment_chrome_fixture_receipt_testonly.mjs"],
+  ["scripts/comment_fixture_browser_e2e.mjs", "scripts/comment_chrome_scan_fixture_testonly.mjs"],
+  ["scripts/comment_fixture_browser_e2e.mjs", "scripts/comment_chrome_send.mjs"],
+  ["scripts/comment_chrome_fixture_contract_test.mjs", "scripts/comment_fixture_browser_e2e.mjs"],
+  ["scripts/comment_chrome_fixture_contract_test.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_fixture_contract_test.mjs", "scripts/comment_chrome_fixture_evidence_testonly.mjs"],
+  ["scripts/comment_chrome_fixture_contract_test.mjs", "scripts/comment_chrome_fixture_receipt_testonly.mjs"],
+  ["scripts/comment_chrome_fixture_evidence_testonly.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_fixture_receipt_testonly.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_js_architecture_core.mjs", "scripts/comment_js_architecture_contract.mjs"],
+  ["scripts/comment_js_architecture_core.mjs", "scripts/comment_js_architecture_loaders.mjs"],
+  ["scripts/comment_js_architecture_selftest.mjs", "scripts/comment_js_architecture_contract.mjs"],
+  ["scripts/comment_js_architecture_selftest.mjs", "scripts/comment_js_architecture_core.mjs"],
+  ["scripts/comment_js_architecture_selftest.mjs", "scripts/comment_js_architecture_receipt.mjs"],
+  ["scripts/comment_js_architecture_gate.mjs", "scripts/comment_js_architecture_contract.mjs"],
+  ["scripts/comment_js_architecture_gate.mjs", "scripts/comment_js_architecture_core.mjs"],
+  ["scripts/comment_js_architecture_gate.mjs", "scripts/comment_js_architecture_receipt.mjs"],
+  ["scripts/comment_js_architecture_gate.mjs", "scripts/comment_js_architecture_selftest.mjs"],
+]);
+
+export const ALLOWED_ROLE_TARGETS = Object.freeze({
+  production: new Set(["production"]),
+  "fixture-testonly": new Set(["production", "fixture-testonly"]),
+  test: new Set(["production", "fixture-testonly", "test", "e2e"]),
+  e2e: new Set(["production", "fixture-testonly"]),
+  "fixture-runtime": new Set(),
+  tools: new Set(["tools"]),
+});
+
+export const FIXTURE_E2E_DIRECT_TARGETS = Object.freeze([
+  "scripts/comment_chrome_common.mjs",
+  "scripts/comment_chrome_fixture_evidence_testonly.mjs",
+  "scripts/comment_chrome_fixture_receipt_testonly.mjs",
+  "scripts/comment_chrome_scan_fixture_testonly.mjs",
+  "scripts/comment_chrome_send.mjs",
+]);
+
+export const FIXTURE_EVIDENCE_MODULE_CLOSURE = Object.freeze([
+  "scripts/comment_fixture_browser_e2e.mjs",
+  "scripts/comment_chrome_common.mjs",
+  "scripts/comment_chrome_fixture_evidence_testonly.mjs",
+  "scripts/comment_chrome_fixture_receipt_testonly.mjs",
+  "scripts/comment_chrome_host_authority.mjs",
+  "scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs",
+  "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs",
+  "scripts/comment_chrome_node_frame_mapping.mjs",
+  "scripts/comment_chrome_node_frame_mapping_testonly.mjs",
+  "scripts/comment_chrome_reply_exhaustion.mjs",
+  "scripts/comment_chrome_runtime_authority.mjs",
+  "scripts/comment_chrome_scan.mjs",
+  "scripts/comment_chrome_scan_adapters.mjs",
+  "scripts/comment_chrome_scan_fixture_testonly.mjs",
+  "scripts/comment_chrome_send.mjs",
+  "scripts/comment_chrome_send_support.mjs",
+].sort());
+
+export const FIXTURE_EVIDENCE_FORBIDDEN_NODE_IMPORTS = Object.freeze([
+  "node:child_process",
+  "node:cluster",
+  "node:module",
+  "node:vm",
+  "node:worker_threads",
+]);
+
+export const FIXTURE_ALLOWED_NODE_IMPORTS = Object.freeze({
+  "scripts/comment_fixture_browser_e2e.mjs": Object.freeze([
+    "node:assert/strict", "node:crypto", "node:fs/promises", "node:path", "node:url",
+  ]),
+  "scripts/comment_chrome_common.mjs": Object.freeze(["node:crypto"]),
+  "scripts/comment_chrome_fixture_evidence_testonly.mjs": Object.freeze([
+    "node:assert/strict", "node:crypto", "node:fs/promises", "node:http", "node:path",
+    "node:url",
+  ]),
+  "scripts/comment_chrome_fixture_receipt_testonly.mjs": Object.freeze([]),
+  "scripts/comment_chrome_host_authority.mjs": Object.freeze(["node:crypto"]),
+  "scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs": Object.freeze([]),
+  "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs": Object.freeze([]),
+  "scripts/comment_chrome_node_frame_mapping.mjs": Object.freeze([]),
+  "scripts/comment_chrome_node_frame_mapping_testonly.mjs": Object.freeze([]),
+  "scripts/comment_chrome_reply_exhaustion.mjs": Object.freeze(["node:crypto"]),
+  "scripts/comment_chrome_runtime_authority.mjs": Object.freeze([
+    "node:crypto", "node:fs/promises",
+  ]),
+  "scripts/comment_chrome_scan.mjs": Object.freeze([]),
+  "scripts/comment_chrome_scan_adapters.mjs": Object.freeze([]),
+  "scripts/comment_chrome_scan_fixture_testonly.mjs": Object.freeze([]),
+  "scripts/comment_chrome_send.mjs": Object.freeze([]),
+  "scripts/comment_chrome_send_support.mjs": Object.freeze([]),
+});
+
+export const FIXTURE_ALLOWED_PROCESS_MEMBERS = Object.freeze({
+  "scripts/comment_fixture_browser_e2e.mjs": Object.freeze(["argv", "typeof"]),
+});
+
+// This exact lazy import is the reviewed trusted Node REPL bridge. Delaying it
+// keeps a public source checkout testable before installation, while the
+// caller still cannot supply a path, runtime, transport, browser, or tab.
+export const REVIEWED_EXTERNAL_IMPORTS = Object.freeze([
+  Object.freeze({
+    source: "scripts/comment_chrome_runtime_authority.mjs",
+    specifier: "../../../plugins/cache/openai-bundled/chrome/26.818.41509/scripts/browser-client.mjs",
+    kind: "dynamic",
+    count: 1,
+  }),
+]);
+
+export const REVIEWED_EXTERNAL_DYNAMIC_IMPORTS = Object.freeze({
+  "scripts/comment_chrome_runtime_authority.mjs": Object.freeze(
+    REVIEWED_EXTERNAL_IMPORTS.filter((row) => row.kind === "dynamic")
+      .map((row) => row.specifier),
+  ),
+});
+
+export const FIXTURE_FS_PROMISES_BINDINGS = Object.freeze({
+  "scripts/comment_chrome_runtime_authority.mjs": Object.freeze(["readFile"]),
+  "scripts/comment_fixture_browser_e2e.mjs": Object.freeze([
+    "lstat", "mkdir", "open", "readFile", "rename", "rm", "rmdir",
+  ]),
+  "scripts/comment_chrome_fixture_evidence_testonly.mjs": Object.freeze([
+    "lstat", "readFile", "readdir",
+  ]),
+});
+
+export const FIXTURE_PUBLIC_FUNCTIONS = Object.freeze({
+  "scripts/comment_fixture_browser_e2e.mjs": Object.freeze([
+    "assertSnapshotsUnchanged",
+    "fixturePlatforms",
+    "requireLoopbackBaseUrl",
+    "runAllFixtureBrowserE2E",
+    "testFixtureNavigationReadiness",
+    "testFixturePersistenceFinalizer",
+    "validateExactFixtureBatch",
+  ]),
+  "scripts/comment_chrome_fixture_receipt_testonly.mjs": Object.freeze([
+    "parseCanonicalThreePlatformFixtureReceipt",
+    "validateThreePlatformFixtureReceipt",
+  ]),
+});
+
+export function moduleRoleFor(modulePath) {
+  return Object.hasOwn(EXPECTED_MODULE_ROLES, modulePath)
+    ? EXPECTED_MODULE_ROLES[modulePath] : null;
+}

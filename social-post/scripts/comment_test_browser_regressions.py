@@ -13,6 +13,11 @@ from comment_store import load_comment_records
 from comment_test_browser_adapter import LocalFixtureCommentAdapter
 from comment_test_cli import draft_cli_fixture, prepare_cli_fixture, run_cli
 from comment_test_support import POLICY
+from comment_test_browser_contract_support import (
+    add_scan_provenance_evidence, capture_receipt_commit, provenance_envelope,
+    remember_receipt_capability, create_scan_request as create_bound_scan_request,
+    scan_envelope, scan_provenance_envelope,
+)
 from social_validation import parse_time
 
 
@@ -40,20 +45,11 @@ def create_scan_request(
     script: Path, root: Path, adapter: LocalFixtureCommentAdapter,
     *, session_id: str = "scan-regression",
 ) -> dict:
-    scanned = adapter.scan()
-    page_url = PLATFORM_URLS[adapter.spec.platform]
-    request_path = root / "data" / "browser_scan_requests.jsonl"
-    request_path.touch(exist_ok=True)
-    run_cli(
-        script, root, "browser-scan-request", "--platform", adapter.spec.platform,
-        "--account-key", scanned["account_key"], "--post-key", scanned["post_key"],
-        "--post-permalink", page_url, "--session-id", session_id,
-        "--ttl-minutes", "5", "--write",
-    )
-    rows = request_path.read_text(encoding="utf-8").splitlines()
-    if len(rows) != 1:
-        raise AssertionError("regression fixture expected one browser scan request")
-    return json.loads(rows[0])
+    envelope = scan_envelope(adapter)
+    if session_id != "scan-regression":
+        # The shared fixture owns uniqueness; these tests only use the default.
+        raise AssertionError("regression fixture uses one canonical scan session")
+    return create_bound_scan_request(script, root, envelope)
 
 
 def scan_payload(adapter: LocalFixtureCommentAdapter, request: dict) -> dict:
@@ -94,7 +90,7 @@ def submit_scan(
     script: Path, root: Path, request: dict, payload: dict, *, expected: int = 0,
 ) -> None:
     source = root / "regression-browser-scan.json"
-    write_json(source, payload)
+    write_json(source, scan_provenance_envelope(root, request, payload))
     run_cli(
         script, root, "browser-scan", str(source),
         "--scan-request-id", request["scan_request_id"],
@@ -108,7 +104,7 @@ def approved_action(
     script, _unused = prepare_cli_fixture(root, live_browser_actuation_enabled=True)
     adapter = LocalFixtureCommentAdapter(platform)
     request = create_scan_request(script, root, adapter)
-    payload = scan_payload(adapter, request)
+    payload = add_scan_provenance_evidence(scan_payload(adapter, request))
     submit_scan(script, root, request, payload)
     comment_path = root / "data" / "comment_events.jsonl"
     comment = json.loads(comment_path.read_text(encoding="utf-8").splitlines()[0])
@@ -140,10 +136,20 @@ def begin_with_receipt(
 ) -> object:
     source = root / "regression-preflight.json"
     write_json(source, receipt)
-    return run_cli(
+    completed = run_cli(
         script, root, "browser-begin", str(source), "--intent-id", intent_id,
         "--session-id", "session-cli", "--write", expected=expected,
     )
+    if expected == 0:
+        lines = [
+            line.removeprefix("SUBMIT_CLAIM ") for line in completed.stdout.splitlines()
+            if line.startswith("SUBMIT_CLAIM ")
+        ]
+        if len(lines) != 1:
+            raise AssertionError("regression browser-begin emitted no unique claim")
+        claim = json.loads(lines[0])
+        remember_receipt_capability(root, intent_id, claim["receipt_capability"])
+    return completed
 
 
 def shorten_permit_expiry(reply_path: Path) -> str:
@@ -179,11 +185,14 @@ def check_visible_reply_cannot_be_failed() -> None:
         if not receipt["exact_reply_visible"] or not receipt["own_author_verified"]:
             raise AssertionError("fixture did not expose contradictory success evidence")
         source = root / "regression-result.json"
-        write_json(source, receipt)
-        run_cli(
+        write_json(source, provenance_envelope(
+            root, intent_id, "browser-finish", receipt,
+        ))
+        completed = run_cli(
             script, root, "browser-finish", str(source), "--intent-id", intent_id,
             "--session-id", "session-cli", "--write",
         )
+        capture_receipt_commit(root, intent_id, completed.stdout)
         if intent_state(root, intent_id)["status"] != "needs_reconcile":
             raise AssertionError("visible own reply was incorrectly classified failed")
 

@@ -9,6 +9,11 @@ import unicodedata
 from datetime import datetime
 from typing import Any
 
+from comment_scan_provenance import (
+    SCAN_PROVENANCE_DIGEST_FIELD,
+    comment_scan_provenance_digest,
+    validate_scan_provenance,
+)
 from social_validation import parse_time
 
 
@@ -87,7 +92,7 @@ def _normalized_identity(value: dict[str, Any], body: str) -> dict[str, Any]:
 
 
 def _comment_event(value: dict[str, Any], identity: dict[str, Any]) -> dict[str, Any]:
-    return {
+    result = {
         "schema_version": 1,
         "event_id": value.get("event_id"),
         **identity,
@@ -101,6 +106,16 @@ def _comment_event(value: dict[str, Any], identity: dict[str, Any]) -> dict[str,
         "has_own_reply": _strict_boolean(value.get("has_own_reply")),
         "source": "chrome_ui",
     }
+    if value.get("scan_provenance") is not None or value.get(
+        SCAN_PROVENANCE_DIGEST_FIELD
+    ) is not None:
+        provenance = validate_scan_provenance(value.get("scan_provenance"))
+        supplied = value.get(SCAN_PROVENANCE_DIGEST_FIELD)
+        if supplied != provenance["provenance_digest"]:
+            raise ValueError("comment scan provenance digest differs from its envelope")
+        result["scan_provenance"] = provenance
+        result[SCAN_PROVENANCE_DIGEST_FIELD] = supplied
+    return result
 
 
 def normalize_comment(raw: dict[str, Any]) -> dict[str, Any]:
@@ -109,10 +124,42 @@ def normalize_comment(raw: dict[str, Any]) -> dict[str, Any]:
     body = normalized_text(str(value.get("body", value.get("text", ""))))
     result = _comment_event(value, _normalized_identity(value, body))
     result["raw_fingerprint"] = value.get("raw_fingerprint") or comment_fingerprint(result)
-    result["event_id"] = result["event_id"] or stable_id(
-        "comment-event", result["comment_key"], result["raw_fingerprint"], result["observed_at"],
-    )
+    event_parts = [
+        result["comment_key"], result["raw_fingerprint"], result["observed_at"],
+    ]
+    if result.get(SCAN_PROVENANCE_DIGEST_FIELD):
+        event_parts.append(result[SCAN_PROVENANCE_DIGEST_FIELD])
+    result["event_id"] = result["event_id"] or stable_id("comment-event", *event_parts)
     return result
+
+
+def _validate_scan_provenance_shape(
+    row: dict[str, Any], label: str, errors: list[str],
+) -> None:
+    if row.get("scan_provenance") is None and row.get(
+        SCAN_PROVENANCE_DIGEST_FIELD
+    ) is None:
+        return
+    try:
+        digest = comment_scan_provenance_digest(row)
+    except ValueError as exc:
+        errors.append(f"{label} {exc}")
+        return
+    provenance = row["scan_provenance"]
+    expected_scope = {
+        key: row.get(key)
+        for key in ("platform", "account_key", "post_key", "post_permalink")
+    }
+    if provenance.get("scope") != expected_scope:
+        errors.append(f"{label} scan provenance scope differs from comment")
+    if provenance.get("observed_at") != row.get("observed_at"):
+        errors.append(f"{label} scan provenance observed_at differs from comment")
+    expected_event_id = stable_id(
+        "comment-event", row.get("comment_key"), row.get("raw_fingerprint"),
+        row.get("observed_at"), digest,
+    )
+    if row.get("event_id") != expected_event_id:
+        errors.append(f"{label} event_id does not bind its scan provenance")
 
 
 def _validate_identity(row: dict[str, Any], label: str, errors: list[str]) -> None:
@@ -158,6 +205,7 @@ def _validate_comment_shape(row: dict[str, Any], label: str, errors: list[str]) 
     if row.get("source") != "chrome_ui":
         errors.append(f"{label} source must be chrome_ui")
     _validate_identity(row, label, errors)
+    _validate_scan_provenance_shape(row, label, errors)
 
 
 def _record_event_id(
@@ -183,8 +231,14 @@ def _record_latest(
     if previous_time is None or observed > previous_time:
         latest[comment_key] = row
         latest_time[comment_key] = observed
-    elif observed == previous_time and latest[comment_key].get("raw_fingerprint") != row.get("raw_fingerprint"):
-        errors.append(f"{label} conflicting observations share the same timestamp")
+    elif observed == previous_time:
+        previous = latest[comment_key]
+        if (
+            previous.get("raw_fingerprint") != row.get("raw_fingerprint")
+            or previous.get(SCAN_PROVENANCE_DIGEST_FIELD)
+            != row.get(SCAN_PROVENANCE_DIGEST_FIELD)
+        ):
+            errors.append(f"{label} conflicting observations share the same timestamp")
 
 
 def validate_comment_events(

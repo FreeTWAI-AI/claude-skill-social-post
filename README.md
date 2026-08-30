@@ -2,9 +2,21 @@
 
 一個可安裝到 Codex 或 Claude Code 的社群內容 Skill：學習本機聲線、規劃內容、撰寫平台化貼文、經確認後發布，以已登入 Chrome 受控管理 FB／IG／Threads 留言，並把跨平台洞察保存成可驗證的結構化資料。
 
-目前版本：**v2.5.0**。
+目前穩定標籤：**v2.5.0**；`main` 已同步 **Unreleased candidate**。
+
+Unreleased candidate 已完成 41 個 JavaScript 模組的封閉清單、103 條 internal static edge、1 條精確審核的 external lazy boundary、0 cycle／0 failure、80 項 architecture 自校準檢查與 22 項固定 actuator runner cases。這些是本機 contract 與 localhost test-only 證據，不代表 live Meta 回覆已解鎖。
 
 > v2.5.0 是 default-disabled 安全預覽版。正式 policy 的 `live_browser_actuation_enabled` 預設為 `false`；在受控 Browser fixture、三平台登入後 draft-only 與各平台一則核准 canary 通過前，live scan completion、begin、click、finish、reconcile 都不開放。
+
+## Unreleased on main
+
+- 結構化分析不只保存成效數字，也保存原文 SHA、確定性長度、版型／黑底白字屬性、關鍵字、實體、數字語言、voice、CTA、完整 Unicode 標點，以及日期、星期、`HH:mm` 與 daypart。
+- 新增 `coverage` gate，逐篇證明完整原文、長度、版型、關鍵字、語氣、標點、發文時間與 outcome 確實進入 feature matrix；每個適用的平台 analytics 子樹另有 exact-compare 維度，未被固定 schema 命名的新欄位也會進 `extended_analytics`，低信心 placeholder 不會混入規律。
+- P0 規劃與 P2 撰稿必須先讀 canonical comparables／context；只有同平台、同 maturity、同 content type 與同 surface 才能比較 outcome。
+- 發文分鐘只作候選變因，`causal_claim_allowed:false`；不會因兩篇同時發文就把流量差歸因於時間。
+- FB／IG／Threads localhost Browser E2E 已通過：每平台各掃描兩則、只接受一次送出、正確 parent 與 exact reply 均可驗證。證據仍是 `localhost_test_only_candidate`、`in_memory_test_only`，promotion 與 live actuation 都保持 false。
+- 修正 contenteditable readback、跨 realm submit schema、導頁後平台／帳號／貼文 readiness gate，以及每次 attempt 明示 `test_only`。
+- 唯一核准的 browser-client lazy import 現在會在載入前驗證固定 revision、bytes 與 SHA-256，並寫入 architecture receipt；缺檔、重複 import、eager import 或任一欄漂移都 fail closed。
 
 ## v2.5.0
 
@@ -67,6 +79,8 @@ Copy-Item content_plan.example.md content_plan.md
 
 P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供 24/7 背景監聽或無邊界的全自動模式。v2.5.0 的 live ledger mutation 另由 default-off kill switch 擋住；即使使用者核准回覆也不會繞過。未來實際掃描與送出還需要執行環境提供 `chrome:control-chrome`、使用者已開啟的 Chrome、既有登入狀態與通過驗證的平台 adapter；目前仍可使用草稿、政策、ledger 與測試功能。
 
+Codex 與 Claude Code 都能使用 P0–P4、P5 的離線草稿／政策／ledger／測試功能。現有 existing-session Chrome runtime 則固定依賴 Codex bundled Chrome revision；Claude Code 或獨立公開 clone 找不到精確 runtime 時會 fail closed，不會改走未審核的瀏覽器路徑，也不代表 Claude 安裝已具備 live Meta 控制能力。
+
 ```powershell
 $env:PYTHONUTF8='1'
 python scripts/comment_assistant.py validate
@@ -76,6 +90,7 @@ python scripts/comment_capability_gate.py
 node scripts/comment_chrome_actuator_test.mjs
 node scripts/comment_chrome_claim_bridge_test.mjs
 node scripts/comment_chrome_claim_integration_test.mjs
+node scripts/comment_js_architecture_gate.mjs --self-test
 ```
 
 實際流程與停損條件見 [`comment-operations.md`](social-post/references/comment-operations.md)，JSON bridge contract 見 [`chrome-comment-adapter.md`](social-post/references/chrome-comment-adapter.md)。定位依當下可見 DOM／accessibility state 建立，不使用一組長期寫死的 Meta selector。所有 ledger command 預設 dry-run，明確加上 `--write` 才會寫入本機。
@@ -87,6 +102,7 @@ $env:PYTHONUTF8='1'
 python scripts/log_outcome.py references/outcome-bundle.example.json
 python scripts/self_test.py
 python scripts/social_data.py validate
+python scripts/social_data.py coverage
 python scripts/social_data.py summary --series demo-series
 ```
 
@@ -100,6 +116,7 @@ python scripts/social_data.py summary --series demo-series
 - `data/*.jsonl` 的真實 outcome／correction；
 - `comment_events.jsonl`、`reply_events.jsonl`、`browser_scan_requests.jsonl` 的真實留言、作者、貼文、回覆與掃描目標；
 - 原始洞察截圖、caption archive、帳號名稱、個人路徑；
+- 私人 JSONL 貼文／成效／correction／帳號資料與 `.rd` receipts／canonical ledger；
 - Cookie、session、access token、瀏覽器 profile、登入資料；
 - 從私人數據升級出的規則、公式或案例。
 
@@ -108,11 +125,13 @@ python scripts/social_data.py summary --series demo-series
 ```powershell
 python social-post/scripts/self_test.py
 python social-post/scripts/social_data.py validate
+python social-post/scripts/social_data.py coverage
 python social-post/scripts/comment_assistant.py validate
 python social-post/scripts/comment_capability_gate.py
 node social-post/scripts/comment_chrome_actuator_test.mjs
 node social-post/scripts/comment_chrome_claim_bridge_test.mjs
 node social-post/scripts/comment_chrome_claim_integration_test.mjs
+node social-post/scripts/comment_js_architecture_gate.mjs --self-test
 ```
 
 ## License

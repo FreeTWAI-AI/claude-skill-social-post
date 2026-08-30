@@ -16,6 +16,19 @@ import {
   verifyExpansionComplete,
   verifyNearestAnchorOwner,
 } from "./comment_chrome_common.mjs";
+import {
+  attestTrustedPlatformExpansion,
+  isTrustedPlatformScanPlan,
+  requireTrustedPlatformScanPlan,
+  verifyTrustedExpansionStillComplete,
+} from "./comment_chrome_scan_adapters.mjs";
+
+const LIVE_SCAN_AUTHORITY = Object.freeze({
+  attest: attestTrustedPlatformExpansion,
+  isTrustedPlan: isTrustedPlatformScanPlan,
+  requirePlan: requireTrustedPlatformScanPlan,
+  verifyComplete: verifyTrustedExpansionStillComplete,
+});
 
 function assertScanRequest(request) {
   if (!request || typeof request !== "object") fail("scan request must be an object");
@@ -151,11 +164,44 @@ function parseBooleanEvidence(value, label) {
   fail(`${label} is not explicit boolean evidence`);
 }
 
-export function createScanPost({ clock } = {}) {
+function assertTrustedAuthority(authority) {
+  if (!authority || typeof authority !== "object") {
+    fail("trusted scan authority is required");
+  }
+  for (const name of ["attest", "isTrustedPlan", "requirePlan", "verifyComplete"]) {
+    if (typeof authority[name] !== "function") {
+      fail(`trusted scan authority.${name} must be a function`);
+    }
+  }
+  return authority;
+}
+
+function createScanPostWithAuthority(
+  { clock } = {}, authority = LIVE_SCAN_AUTHORITY, { isolatedTestOnly = false } = {},
+) {
+  const trustedAuthority = assertTrustedAuthority(authority);
   return async function scanPost(tab, rawRequest, rawPlan, rawOptions = {}) {
     const request = assertScanRequest(immutableJsonSnapshot(rawRequest, "scan request"));
-    const plan = assertScanPlan(immutableJsonSnapshot(rawPlan, "scan locator plan"));
     const options = immutableJsonSnapshot(rawOptions, "scan options");
+    const testOnly = receiptTestOnly(options);
+    if (isolatedTestOnly && !testOnly) {
+      fail("isolated fixture scan requires testOnly=true and a loopback browser URL");
+    }
+    const trustedPlan = trustedAuthority.isTrustedPlan(rawPlan);
+    let plan;
+    if (trustedPlan) {
+      plan = trustedAuthority.requirePlan(
+        rawPlan, request.platform, { testOnly },
+      );
+      if (Object.prototype.hasOwnProperty.call(options, "threadExpansionComplete")) {
+        fail("trusted scan expansion is actuator-attested; caller threadExpansionComplete is forbidden");
+      }
+    } else {
+      if (!testOnly) {
+        fail("live scan requires a branded trusted platform scan plan; arbitrary raw locator plans are forbidden");
+      }
+      plan = assertScanPlan(immutableJsonSnapshot(rawPlan, "test-only scan locator plan"));
+    }
     const actionShape = { scope: request, post_permalink: request.post_permalink };
     const observedUrl = mappedObservedUrl(await tab.url(), actionShape, options);
     await verifyEvidence(
@@ -170,54 +216,82 @@ export function createScanPost({ clock } = {}) {
     );
     const maximum = options.maxComments ?? 100;
     if (!Number.isInteger(maximum) || maximum < 0) fail("maxComments must be a non-negative integer");
-    const expansionComplete = options.threadExpansionComplete === true;
-    const testOnly = receiptTestOnly(options);
-    if (!testOnly && !expansionComplete) {
-      fail("live scan requires verified comment and reply expansion");
+    let expansionAttestation = null;
+    const expansionComplete = trustedPlan || options.threadExpansionComplete === true;
+    if (trustedPlan) {
+      expansionAttestation = await trustedAuthority.attest(
+        tab, plan, request.platform, { testOnly },
+      );
     }
     const completion = {
       commentsExpanded: expansionComplete,
       repliesExpanded: expansionComplete,
     };
-    const initialExpansionCount = await expansionControlCount(tab, plan);
-    if (expansionComplete) {
+    const initialExpansionCount = trustedPlan ? 0 : await expansionControlCount(tab, plan);
+    if (!trustedPlan && expansionComplete) {
       await verifyExpansionComplete(tab, null, plan.expansionControls, "comment thread expansion");
     }
     const first = await scanCollection(tab, plan, request, completion, maximum);
     if (first.end_total !== first.total) {
       fail(`scan comment count drifted during inspection: ${first.total} to ${first.end_total}`);
     }
-    const middleExpansionCount = await expansionControlCount(tab, plan);
-    if (middleExpansionCount !== initialExpansionCount) {
-      fail(`scan expansion-control count drifted: ${initialExpansionCount} to ${middleExpansionCount}`);
+    if (trustedPlan) {
+      await trustedAuthority.verifyComplete(
+        tab, plan, request.platform, expansionAttestation, { testOnly },
+      );
+    } else {
+      const middleExpansionCount = await expansionControlCount(tab, plan);
+      if (middleExpansionCount !== initialExpansionCount) {
+        fail(`scan expansion-control count drifted: ${initialExpansionCount} to ${middleExpansionCount}`);
+      }
     }
-    if (expansionComplete) {
+    if (!trustedPlan && expansionComplete) {
       await verifyExpansionComplete(tab, null, plan.expansionControls, "comment thread expansion");
     }
     const found = await scanCollection(tab, plan, request, completion, maximum);
     if (found.end_total !== found.total) {
       fail(`scan comment count drifted during stability scan: ${found.total} to ${found.end_total}`);
     }
-    const finalExpansionCount = await expansionControlCount(tab, plan);
-    if (finalExpansionCount !== initialExpansionCount) {
-      fail(`scan expansion-control count drifted: ${initialExpansionCount} to ${finalExpansionCount}`);
+    if (trustedPlan) {
+      await trustedAuthority.verifyComplete(
+        tab, plan, request.platform, expansionAttestation, { testOnly },
+      );
+    } else {
+      const finalExpansionCount = await expansionControlCount(tab, plan);
+      if (finalExpansionCount !== initialExpansionCount) {
+        fail(`scan expansion-control count drifted: ${initialExpansionCount} to ${finalExpansionCount}`);
+      }
     }
-    if (expansionComplete) {
+    if (!trustedPlan && expansionComplete) {
       await verifyExpansionComplete(tab, null, plan.expansionControls, "comment thread expansion");
     }
     const finalCount = await locate(tab, null, plan.comments).count();
     if (finalCount !== found.total) {
       fail(`scan comment count drifted after inspection: ${found.total} to ${finalCount}`);
     }
-    const terminalExpansionCount = await expansionControlCount(tab, plan);
-    if (terminalExpansionCount !== initialExpansionCount) {
-      fail(`scan expansion-control count drifted: ${initialExpansionCount} to ${terminalExpansionCount}`);
+    if (trustedPlan) {
+      await trustedAuthority.verifyComplete(
+        tab, plan, request.platform, expansionAttestation, { testOnly },
+      );
+    } else {
+      const terminalExpansionCount = await expansionControlCount(tab, plan);
+      if (terminalExpansionCount !== initialExpansionCount) {
+        fail(`scan expansion-control count drifted: ${initialExpansionCount} to ${terminalExpansionCount}`);
+      }
     }
-    if (expansionComplete) {
+    if (!trustedPlan && expansionComplete) {
       await verifyExpansionComplete(tab, null, plan.expansionControls, "comment thread expansion");
     }
     if (first.total !== found.total || first.snapshot_digest !== found.snapshot_digest) {
       fail("scan comment evidence changed during stability verification");
+    }
+    if (trustedPlan
+        && Number.isInteger(expansionAttestation?.terminal_discovered_count)
+        && found.total !== expansionAttestation.terminal_discovered_count) {
+      fail(
+        `terminal exhaustion discovered ${expansionAttestation.terminal_discovered_count} comments, `
+        + `but the stable inspectable collection contains ${found.total}; virtualized or partial evidence is forbidden`,
+      );
     }
     return {
       schema_version: 1,
@@ -238,10 +312,30 @@ export function createScanPost({ clock } = {}) {
         provided: expansionComplete,
         comments_expanded: expansionComplete,
         replies_expanded: expansionComplete,
-        evidence: expansionComplete
-          ? "all visible comment and reply expansion controls were exhausted"
-          : "thread expansion was not proven by the actuator caller",
+        evidence: trustedPlan
+          ? "versioned adapter proved cursor traversal, monotonic discovered count, explicit terminal coverage, and stable re-verification"
+          : (expansionComplete
+            ? "test-only caller asserted its isolated fixture controls were exhausted"
+            : "test-only fixture expansion was not proven"),
+        ...(expansionAttestation
+          ? { adapter_attestation: expansionAttestation }
+          : {}),
       },
     };
   };
+}
+
+export function createScanPost(options = {}) {
+  return createScanPostWithAuthority(options, LIVE_SCAN_AUTHORITY);
+}
+
+/**
+ * Test-support seam used only by comment_chrome_scan_fixture_testonly.mjs.
+ * It can only emit test_only receipts from loopback URLs; importing this seam
+ * cannot mint a live plan or a live expansion attestation.
+ */
+export function createIsolatedTestOnlyScanPost(options, trustedFixtureAuthority) {
+  return createScanPostWithAuthority(
+    options, trustedFixtureAuthority, { isolatedTestOnly: true },
+  );
 }

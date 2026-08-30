@@ -1,60 +1,495 @@
 {
-  "exclude": [".git/**", "__pycache__/**", "*.pyc"],
-  "length_exceptions": [],
+  "exclude": [
+    ".git/**",
+    "social-post/.rd/**",
+    "__pycache__/**",
+    "*.pyc"
+  ],
+  "thresholds": {
+    "skill_warning": 200,
+    "skill_severe": 400,
+    "reference_warning": 400,
+    "reference_severe": 800,
+    "code_warning": 500,
+    "code_severe": 1000
+  },
+  "length_exceptions": [
+    "social-post/scripts/comment_browser_cli.py",
+    "social-post/scripts/comment_chrome_claim_bridge.mjs",
+    "social-post/scripts/comment_chrome_scan_fixture_testonly.mjs",
+    "social-post/scripts/comment_fixture_browser_e2e.mjs",
+    "social-post/scripts/comment_js_architecture_core.mjs",
+    "social-post/scripts/comment_js_architecture_selftest.mjs",
+    "social-post/scripts/comment_chrome_scan_adapters_test.mjs",
+    "social-post/scripts/comment_scan_provenance.py",
+    "social-post/scripts/comment_test_browser_contract_scan.py",
+    "social-post/scripts/social_data.py",
+    "social-post/scripts/social_data_feature_matrix_test.py",
+    "social-post/scripts/social_validation.py"
+  ],
   "navigation_exceptions": [
-    "social-post/references/rules/R*.md",
-    "social-post/references/formulas/F*.md",
-    "social-post/references/cases/case-*.md"
+    "social-post/references/cases/case-*.md",
+    "social-post/references/rules/R*.md"
   ],
   "id_definition_scopes": {
-    "R": ["social-post/references/rules/R*.md"],
-    "F": ["social-post/references/formulas/F*.md"],
-    "CASE": ["social-post/references/cases/case-*.md"]
+    "R": [
+      "social-post/references/rules/R*.md"
+    ],
+    "F": [
+      "social-post/references/formulas/F*.md"
+    ],
+    "CASE": [
+      "social-post/references/cases/case-*.md"
+    ]
   },
   "range_claim_scopes": {
-    "R": ["social-post/references/rules.md"],
+    "R": [
+      "social-post/references/rules.md"
+    ],
     "F": [],
-    "CASE": ["social-post/references/case_studies.md"]
+    "CASE": [
+      "social-post/references/case_studies.md"
+    ]
   },
-  "sync": {"public_root": null, "ignore": []},
-  "privacy": {"tokens": [], "patterns": [
-    "C:[/\\\\]Users[/\\\\]",
-    "(?i)Authorization\\s*:\\s*Bearer\\s+[A-Za-z0-9._~-]{8,}",
-    "(?i)Cookie\\s*:\\s*[^;\\r\\n]{8,}",
-    "(?i)Chrome[/\\\\]User Data[/\\\\](Default|Profile [0-9]+)",
-    "(?i)(access[_-]?token|session[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password)\\s*[:=]\\s*[\\\"'][^\\\"']{8,}[\\\"']",
-    "\\.(har|trace)$"
-  ]},
+  "sync": {
+    "public_root": null,
+    "ignore": []
+  },
+  "privacy": {
+    "tokens": [],
+    "patterns": [
+      "C:[/\\\\]Users[/\\\\]",
+      "(?i)Authorization\\s*:\\s*Bearer\\s+[A-Za-z0-9._~-]{8,}",
+      "(?i)Cookie\\s*:\\s*[^;\\r\\n]{8,}",
+      "(?i)Chrome[/\\\\]User Data[/\\\\](Default|Profile [0-9]+)",
+      "(?i)(access[_-]?token|session[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password)\\s*[:=]\\s*[\\\"'][^\\\"']{8,}[\\\"']",
+      "\\.(har|trace)$"
+    ]
+  },
   "architecture": {
     "function_warning_lines": 80,
     "function_severe_lines": 160,
     "layers": [
-      {"name": "domain", "patterns": ["social-post/scripts/social_validation.py", "social-post/scripts/comment_identity.py", "social-post/scripts/comment_authorization.py", "social-post/scripts/comment_domain.py", "social-post/scripts/comment_policy.py", "social-post/scripts/comment_browser_contract.py", "social-post/scripts/comment_browser_common.py", "social-post/scripts/comment_browser_scan_contract.py", "social-post/scripts/comment_browser_send_contract.py"], "may_depend_on": []},
-      {"name": "storage", "patterns": ["social-post/scripts/social_store.py", "social-post/scripts/comment_store.py"], "may_depend_on": []},
-      {"name": "application", "patterns": ["social-post/scripts/social_data.py", "social-post/scripts/comment_state.py", "social-post/scripts/comment_capability_gate.py"], "may_depend_on": ["domain", "storage"]},
-      {"name": "cli", "patterns": ["social-post/scripts/log_outcome.py", "social-post/scripts/comment_assistant.py", "social-post/scripts/comment_cli_support.py", "social-post/scripts/comment_browser_cli.py"], "may_depend_on": ["application", "domain", "storage"]},
-      {"name": "browser-actuator", "patterns": ["social-post/scripts/comment_chrome_*.mjs"], "may_depend_on": []},
-      {"name": "test", "patterns": ["social-post/scripts/self_test.py", "social-post/scripts/comment_self_test.py", "social-post/scripts/comment_test_*.py", "social-post/scripts/comment_*_test.mjs", "social-post/scripts/comment_fixture_browser_e2e.mjs"], "may_depend_on": ["application", "domain", "storage", "cli", "browser-actuator", "tools"]},
-      {"name": "tools", "patterns": ["social-post/scripts/build_rule_registry.py", "social-post/scripts/split_*.py"], "may_depend_on": []}
+      {
+        "name": "domain",
+        "patterns": [
+          "social-post/scripts/social_post_analysis.py",
+          "social-post/scripts/social_validation.py",
+          "social-post/scripts/comment_identity.py",
+          "social-post/scripts/comment_authorization.py",
+          "social-post/scripts/comment_domain.py",
+          "social-post/scripts/comment_reply_validation.py",
+          "social-post/scripts/comment_policy.py",
+          "social-post/scripts/comment_browser_contract.py",
+          "social-post/scripts/comment_browser_common.py",
+          "social-post/scripts/comment_browser_provenance.py",
+          "social-post/scripts/comment_scan_provenance.py",
+          "social-post/scripts/comment_browser_scan_contract.py",
+          "social-post/scripts/comment_browser_send_contract.py"
+        ],
+        "may_depend_on": []
+      },
+      {
+        "name": "storage",
+        "patterns": [
+          "social-post/scripts/social_store.py",
+          "social-post/scripts/comment_store.py"
+        ],
+        "may_depend_on": []
+      },
+      {
+        "name": "promotion-contract",
+        "patterns": [
+          "social-post/scripts/comment_capability_promotion_contract.py"
+        ],
+        "may_depend_on": []
+      },
+      {
+        "name": "promotion-receipt",
+        "patterns": [
+          "social-post/scripts/comment_capability_receipt_support.py"
+        ],
+        "may_depend_on": [
+          "promotion-contract"
+        ]
+      },
+      {
+        "name": "promotion-verifier",
+        "patterns": [
+          "social-post/scripts/comment_capability_trusted_host_verifier.py"
+        ],
+        "may_depend_on": [
+          "promotion-contract",
+          "promotion-receipt"
+        ]
+      },
+      {
+        "name": "promotion-evidence",
+        "patterns": [
+          "social-post/scripts/comment_capability_mapping_evidence.py"
+        ],
+        "may_depend_on": [
+          "promotion-contract",
+          "promotion-receipt"
+        ]
+      },
+      {
+        "name": "promotion-semantics",
+        "patterns": [
+          "social-post/scripts/comment_capability_promotion_semantics.py"
+        ],
+        "may_depend_on": [
+          "promotion-contract",
+          "promotion-receipt"
+        ]
+      },
+      {
+        "name": "promotion-facade",
+        "patterns": [
+          "social-post/scripts/comment_capability_promotion.py"
+        ],
+        "may_depend_on": [
+          "promotion-contract",
+          "promotion-receipt",
+          "promotion-semantics",
+          "promotion-verifier"
+        ]
+      },
+      {
+        "name": "application",
+        "patterns": [
+          "social-post/scripts/social_data.py",
+          "social-post/scripts/comment_state.py",
+          "social-post/scripts/comment_capability_gate.py"
+        ],
+        "may_depend_on": [
+          "domain",
+          "storage",
+          "tools",
+          "promotion-facade"
+        ]
+      },
+      {
+        "name": "cli",
+        "patterns": [
+          "social-post/scripts/log_outcome.py",
+          "social-post/scripts/comment_assistant.py",
+          "social-post/scripts/comment_cli_support.py",
+          "social-post/scripts/comment_browser_cli.py"
+        ],
+        "may_depend_on": [
+          "application",
+          "domain",
+          "storage"
+        ]
+      },
+      {
+        "name": "test",
+        "patterns": [
+          "social-post/scripts/self_test.py",
+          "social-post/scripts/comment_self_test.py",
+          "social-post/scripts/comment_capability_gate_calibration.py",
+          "social-post/scripts/comment_capability_promotion_calibration.py",
+          "social-post/scripts/comment_capability_promotion_fixtures.py",
+          "social-post/scripts/comment_test_*.py",
+          "social-post/scripts/comment_chrome_actuator_fixture_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_guards_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_receipts_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_reinspection_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_reply_exhaustion_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_scan_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_send_test.mjs",
+          "social-post/scripts/comment_chrome_actuator_test.mjs",
+          "social-post/scripts/comment_chrome_claim_bridge_test.mjs",
+          "social-post/scripts/comment_chrome_claim_integration_test.mjs",
+          "social-post/scripts/comment_chrome_fixture_contract_test.mjs",
+          "social-post/scripts/comment_chrome_host_authority_test.mjs",
+          "social-post/scripts/comment_chrome_node_frame_lifecycle_test.mjs",
+          "social-post/scripts/comment_chrome_node_frame_mapping_test.mjs",
+          "social-post/scripts/comment_chrome_scan_adapters_test.mjs"
+        ],
+        "may_depend_on": [
+          "application",
+          "domain",
+          "storage",
+          "cli",
+          "browser-actuator",
+          "fixture",
+          "tools",
+          "e2e",
+          "promotion-contract",
+          "promotion-receipt",
+          "promotion-semantics",
+          "promotion-verifier",
+          "promotion-evidence",
+          "promotion-facade"
+        ]
+      },
+      {
+        "name": "e2e",
+        "patterns": [
+          "social-post/scripts/comment_fixture_browser_e2e.mjs"
+        ],
+        "may_depend_on": [
+          "browser-actuator",
+          "fixture"
+        ]
+      },
+      {
+        "name": "fixture",
+        "patterns": [
+          "social-post/scripts/comment_chrome_fixture_evidence_testonly.mjs",
+          "social-post/scripts/comment_chrome_fixture_receipt_testonly.mjs",
+          "social-post/scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs",
+          "social-post/scripts/comment_chrome_node_frame_lifecycle_testonly.mjs",
+          "social-post/scripts/comment_chrome_node_frame_mapping_fixture_testonly.mjs",
+          "social-post/scripts/comment_chrome_node_frame_mapping_testonly.mjs",
+          "social-post/scripts/comment_chrome_scan_fixture_testonly.mjs",
+          "social-post/scripts/comment_adapter_fixtures/fixture-runtime.js"
+        ],
+        "may_depend_on": [
+          "browser-actuator",
+          "fixture"
+        ]
+      },
+      {
+        "name": "browser-actuator",
+        "patterns": [
+          "social-post/scripts/comment_chrome_*.mjs"
+        ],
+        "may_depend_on": []
+      },
+      {
+        "name": "tools",
+        "patterns": [
+          "social-post/scripts/comment_js_architecture_*.mjs",
+          "social-post/scripts/build_rule_registry.py",
+          "social-post/scripts/split_*.py"
+        ],
+        "may_depend_on": []
+      }
     ],
     "required_dependencies": [
-      {"source": "social-post/scripts/log_outcome.py", "target": "social-post/scripts/social_store.py"},
-      {"source": "social-post/scripts/log_outcome.py", "target": "social-post/scripts/social_data.py"},
-      {"source": "social-post/scripts/social_data.py", "target": "social-post/scripts/social_validation.py"},
-      {"source": "social-post/scripts/social_data.py", "target": "social-post/scripts/social_store.py"},
-      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_domain.py"},
-      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_policy.py"},
-      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_cli_support.py"},
-      {"source": "social-post/scripts/comment_assistant.py", "target": "social-post/scripts/comment_browser_cli.py"},
-      {"source": "social-post/scripts/comment_browser_cli.py", "target": "social-post/scripts/comment_browser_contract.py"},
-      {"source": "social-post/scripts/comment_cli_support.py", "target": "social-post/scripts/comment_state.py"},
-      {"source": "social-post/scripts/comment_cli_support.py", "target": "social-post/scripts/comment_store.py"},
-      {"source": "social-post/scripts/comment_domain.py", "target": "social-post/scripts/comment_authorization.py"},
-      {"source": "social-post/scripts/comment_domain.py", "target": "social-post/scripts/comment_identity.py"},
-      {"source": "social-post/scripts/comment_authorization.py", "target": "social-post/scripts/comment_identity.py"},
-      {"source": "social-post/scripts/comment_state.py", "target": "social-post/scripts/comment_domain.py"},
-      {"source": "social-post/scripts/comment_state.py", "target": "social-post/scripts/comment_policy.py"},
-      {"source": "social-post/scripts/comment_store.py", "target": "social-post/scripts/social_store.py"}
+      {
+        "source": "social-post/scripts/log_outcome.py",
+        "target": "social-post/scripts/social_store.py",
+        "message": "outcome writer must use the locked store"
+      },
+      {
+        "source": "social-post/scripts/log_outcome.py",
+        "target": "social-post/scripts/social_data.py",
+        "message": "outcome writer must run canonical validation"
+      },
+      {
+        "source": "social-post/scripts/social_data.py",
+        "target": "social-post/scripts/social_validation.py",
+        "message": "validation orchestration must use schema validators"
+      },
+      {
+        "source": "social-post/scripts/social_data.py",
+        "target": "social-post/scripts/social_store.py",
+        "message": "summary must read the canonical store"
+      },
+      {
+        "source": "social-post/scripts/social_validation.py",
+        "target": "social-post/scripts/social_post_analysis.py",
+        "message": "schema validation must use the canonical post-analysis domain contract"
+      },
+      {
+        "source": "social-post/scripts/comment_assistant.py",
+        "target": "social-post/scripts/comment_domain.py",
+        "message": "comment CLI must use the canonical state machine"
+      },
+      {
+        "source": "social-post/scripts/comment_assistant.py",
+        "target": "social-post/scripts/comment_policy.py",
+        "message": "comment CLI must enforce bounded auto eligibility"
+      },
+      {
+        "source": "social-post/scripts/comment_assistant.py",
+        "target": "social-post/scripts/comment_cli_support.py",
+        "message": "comment CLI must use shared validation and commit support"
+      },
+      {
+        "source": "social-post/scripts/comment_assistant.py",
+        "target": "social-post/scripts/comment_browser_cli.py",
+        "message": "comment CLI must register the structured Chrome bridge"
+      },
+      {
+        "source": "social-post/scripts/comment_browser_cli.py",
+        "target": "social-post/scripts/comment_browser_contract.py",
+        "message": "Chrome CLI boundary must validate structured action and receipt contracts"
+      },
+      {
+        "source": "social-post/scripts/comment_cli_support.py",
+        "target": "social-post/scripts/comment_state.py",
+        "message": "comment CLI support must use canonical validation orchestration"
+      },
+      {
+        "source": "social-post/scripts/comment_state.py",
+        "target": "social-post/scripts/comment_domain.py",
+        "message": "comment state must replay canonical domain events"
+      },
+      {
+        "source": "social-post/scripts/comment_state.py",
+        "target": "social-post/scripts/comment_policy.py",
+        "message": "comment state must apply the canonical send policy"
+      },
+      {
+        "source": "social-post/scripts/comment_cli_support.py",
+        "target": "social-post/scripts/comment_store.py",
+        "message": "comment CLI support must use the append-only locked store"
+      },
+      {
+        "source": "social-post/scripts/comment_domain.py",
+        "target": "social-post/scripts/comment_authorization.py",
+        "message": "comment domain must enforce authorization grants and permits"
+      },
+      {
+        "source": "social-post/scripts/comment_domain.py",
+        "target": "social-post/scripts/comment_identity.py",
+        "message": "comment domain must use canonical comment identity"
+      },
+      {
+        "source": "social-post/scripts/comment_authorization.py",
+        "target": "social-post/scripts/comment_identity.py",
+        "message": "authorization scope must use canonical platform identity"
+      },
+      {
+        "source": "social-post/scripts/comment_store.py",
+        "target": "social-post/scripts/social_store.py",
+        "message": "comment storage must reuse the cross-platform lock and JSONL primitives"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_gate.py",
+        "target": "social-post/scripts/comment_capability_promotion.py",
+        "message": "capability gate must use the fail-closed promotion contract"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion.py",
+        "target": "social-post/scripts/comment_capability_promotion_contract.py",
+        "message": "promotion facade must re-export the closed-world contract"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion.py",
+        "target": "social-post/scripts/comment_capability_receipt_support.py",
+        "message": "promotion facade must use canonical receipt support"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion.py",
+        "target": "social-post/scripts/comment_capability_promotion_semantics.py",
+        "message": "promotion facade must dispatch obligation semantics"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion.py",
+        "target": "social-post/scripts/comment_capability_trusted_host_verifier.py",
+        "message": "promotion facade must source-wire the trusted host callable verifier"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_receipt_support.py",
+        "target": "social-post/scripts/comment_capability_promotion_contract.py",
+        "message": "receipt support must enforce the canonical promotion contract"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_trusted_host_verifier.py",
+        "target": "social-post/scripts/comment_capability_promotion_contract.py",
+        "message": "trusted host verifier must enforce the exact promotion contract"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_trusted_host_verifier.py",
+        "target": "social-post/scripts/comment_capability_receipt_support.py",
+        "message": "trusted host verifier must use canonical UTC receipt parsing"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_semantics.py",
+        "target": "social-post/scripts/comment_capability_promotion_contract.py",
+        "message": "promotion semantics must enforce exact contract primitives"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_semantics.py",
+        "target": "social-post/scripts/comment_capability_receipt_support.py",
+        "message": "promotion semantics must use canonical UTC receipt parsing"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_mapping_evidence.py",
+        "target": "social-post/scripts/comment_capability_promotion_contract.py",
+        "message": "test-only mapping evidence must enforce the closed-world lifecycle contract"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_mapping_evidence.py",
+        "target": "social-post/scripts/comment_capability_receipt_support.py",
+        "message": "test-only mapping evidence must reuse canonical hash and safe-read support"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_gate_calibration.py",
+        "target": "social-post/scripts/comment_capability_gate.py",
+        "message": "gate calibration must exercise production validation without production self-calibration"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_gate_calibration.py",
+        "target": "social-post/scripts/comment_capability_promotion.py",
+        "message": "gate calibration must use the exact promotion dependency graph"
+      },
+      {
+        "source": "social-post/scripts/comment_self_test.py",
+        "target": "social-post/scripts/comment_capability_promotion_calibration.py",
+        "message": "comment self-test must run promotion calibration outside the production gate"
+      },
+      {
+        "source": "social-post/scripts/comment_self_test.py",
+        "target": "social-post/scripts/comment_capability_gate_calibration.py",
+        "message": "comment self-test must run gate calibration outside the production gate"
+      },
+      {
+        "source": "social-post/scripts/comment_self_test.py",
+        "target": "social-post/scripts/comment_test_trusted_host_verifier.py",
+        "message": "comment self-test must run the offline trusted-host boundary calibration"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_calibration.py",
+        "target": "social-post/scripts/comment_capability_promotion.py",
+        "message": "promotion calibration must exercise the canonical promotion contract"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_calibration.py",
+        "target": "social-post/scripts/comment_capability_promotion_fixtures.py",
+        "message": "promotion calibration must use isolated positive fixture builders"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_calibration.py",
+        "target": "social-post/scripts/comment_test_mapping_evidence.py",
+        "message": "promotion calibration must exercise the non-promotable lifecycle evidence boundary"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_fixtures.py",
+        "target": "social-post/scripts/comment_capability_promotion.py",
+        "message": "promotion fixtures must be derived from the public promotion facade"
+      },
+      {
+        "source": "social-post/scripts/comment_capability_promotion_fixtures.py",
+        "target": "social-post/scripts/comment_capability_promotion_contract.py",
+        "message": "promotion fixtures must use the exact lifecycle contract constants"
+      },
+      {
+        "source": "social-post/scripts/comment_test_mapping_evidence.py",
+        "target": "social-post/scripts/comment_capability_mapping_evidence.py",
+        "message": "mapping evidence calibration must exercise the structural validator"
+      },
+      {
+        "source": "social-post/scripts/comment_test_mapping_evidence.py",
+        "target": "social-post/scripts/comment_capability_promotion.py",
+        "message": "mapping evidence calibration must prove production promotion rejects test-only evidence"
+      },
+      {
+        "source": "social-post/scripts/comment_test_mapping_evidence.py",
+        "target": "social-post/scripts/comment_capability_promotion_fixtures.py",
+        "message": "mapping evidence calibration must use isolated test-only fixtures"
+      },
+      {
+        "source": "social-post/scripts/comment_test_trusted_host_verifier.py",
+        "target": "social-post/scripts/comment_capability_trusted_host_verifier.py",
+        "message": "trusted-host calibration must exercise the production verifier boundary"
+      }
     ]
   }
 }

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import sys
 import tempfile
@@ -94,6 +96,14 @@ def prepare_records(
 ) -> tuple[dict[Path, list[dict[str, Any]]], dict[str, Any], str]:
     base_revision = store_revision(data_dir)
     post = bundle.get("post")
+    if isinstance(post, dict):
+        post = copy.deepcopy(post)
+        post.setdefault("analysis_status", "pending")
+        post.setdefault("analysis_version", "pending")
+        post.setdefault("analysis_eligible", False)
+        caption = post.get("caption")
+        if isinstance(caption, str):
+            post.setdefault("caption_sha256", hashlib.sha256(caption.encode("utf-8")).hexdigest())
     snapshot = bundle.get("snapshot")
     account_snapshot = bundle.get("account_snapshot")
     experiment = bundle.get("experiment")

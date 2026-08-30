@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="zh-Hant"
       data-fixture-origin="local-only"
+      data-fixture-frame-id="threads-main-frame"
+      data-fixture-document-epoch="threads-document-epoch-001"
+      data-fixture-node-id="threads-document-node"
       data-platform="threads"
       data-account-key="fixture-account"
       data-post-key="fixture-threads-post"
@@ -8,6 +11,9 @@
       data-observed-at="2026-08-28T10:00:00+08:00"
       data-submit-attempts="0"
       data-accepted-count="0"
+      data-fixture-expansion-cursor="terminal-page"
+      data-fixture-discovered-count="2"
+      data-fixture-expansion-terminal="true"
       data-fixture-runtime-state="loading">
   <head>
     <meta charset="utf-8">
@@ -16,25 +22,37 @@
   </head>
   <body>
     <section data-threads-reply-id="threads-reply-001"
+             data-fixture-node-id="threads-reply-node-001"
              data-author-key="viewer-threads"
              data-parent-post-permalink="https://www.threads.com/@fixture/post/fixture-threads-post"
              data-is-own="false">
       <a data-threads-comment-permalink
          href="https://fixture.invalid/threads/post/fixture-threads-post/reply/threads-reply-001">4 小時</a>
-      <span data-threads-author>Threads Fixture Viewer</span>
-      <p data-threads-body>有下一集記得通知我！</p>
+      <span data-threads-author data-fixture-node-id="threads-author-node-001">Threads Fixture Viewer</span>
+      <p data-threads-body data-fixture-node-id="threads-body-node-001">有下一集記得通知我！</p>
       <button data-threads-reply-trigger aria-label="回覆">回覆</button>
+      <span data-fixture-reply-exhaustion-state
+            data-fixture-node-id="threads-exhaustion-node-001"
+            data-reply-cursor="terminal-0"
+            data-reply-discovered-count="0"
+            data-reply-terminal="true">reply thread terminal</span>
       <section data-threads-own-replies aria-live="polite"></section>
       <div data-threads-composer contenteditable="true" role="textbox" aria-label="回覆串文"></div>
       <button data-threads-submit type="button" aria-label="發佈回覆">發佈</button>
     </section>
     <section data-threads-reply-id="threads-reply-decoy"
+             data-fixture-node-id="threads-reply-node-decoy"
              data-author-key="viewer-threads-decoy"
              data-parent-post-permalink="https://www.threads.com/@fixture/post/fixture-threads-post"
              data-is-own="false">
-      <span data-threads-author>Threads Decoy Viewer</span>
-      <p data-threads-body>這一則不能收到目標回覆。</p>
+      <span data-threads-author data-fixture-node-id="threads-author-node-decoy">Threads Decoy Viewer</span>
+      <p data-threads-body data-fixture-node-id="threads-body-node-decoy">這一則不能收到目標回覆。</p>
       <button data-threads-reply-trigger aria-label="回覆">回覆</button>
+      <span data-fixture-reply-exhaustion-state
+            data-fixture-node-id="threads-exhaustion-node-decoy"
+            data-reply-cursor="terminal-0"
+            data-reply-discovered-count="0"
+            data-reply-terminal="true">reply thread terminal</span>
       <section data-threads-own-replies aria-live="polite"></section>
       <div data-threads-composer contenteditable="true" role="textbox" aria-label="回覆串文"></div>
       <button data-threads-submit type="button" aria-label="發佈回覆">發佈</button>

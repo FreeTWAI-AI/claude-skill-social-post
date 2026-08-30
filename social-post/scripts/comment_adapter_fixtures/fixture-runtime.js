@@ -5,20 +5,26 @@
   const specs = {
     facebook: {
       target: "[data-fb-comment-id]", id: "data-fb-comment-id",
+      author: "[data-fb-author]", body: "[data-fb-body]",
       trigger: "[data-fb-reply-trigger]", composer: "[data-fb-composer]",
       submit: "[data-fb-submit]", replies: "[data-fb-own-replies]",
+      exhaustionState: "[data-fixture-reply-exhaustion-state]",
       replyTag: "div", replyAttribute: "data-fb-own-reply",
     },
     instagram: {
       target: "[data-ig-comment-id]", id: "data-ig-comment-id",
+      author: "[data-ig-author]", body: "[data-ig-body]",
       trigger: "[data-ig-reply-trigger]", composer: "[data-ig-composer]",
       submit: "[data-ig-submit]", replies: "[data-ig-own-replies]",
+      exhaustionState: "[data-fixture-reply-exhaustion-state]",
       replyTag: "li", replyAttribute: "data-ig-own-reply",
     },
     threads: {
       target: "[data-threads-reply-id]", id: "data-threads-reply-id",
+      author: "[data-threads-author]", body: "[data-threads-body]",
       trigger: "[data-threads-reply-trigger]", composer: "[data-threads-composer]",
       submit: "[data-threads-submit]", replies: "[data-threads-own-replies]",
+      exhaustionState: "[data-fixture-reply-exhaustion-state]",
       replyTag: "article", replyAttribute: "data-threads-own-reply",
     },
   };
@@ -48,8 +54,11 @@
   }
   const accountKey = root.dataset.accountKey;
   const ids = targets.map((target) => target.getAttribute(spec.id));
-  if (!accountKey || ids.some((id) => !id) || new Set(ids).size !== ids.length
-      || targets.some((target) => !target.dataset.parentPostPermalink)) {
+  if (!accountKey || !root.dataset.fixtureFrameId || !root.dataset.fixtureDocumentEpoch
+      || !root.dataset.fixtureNodeId || ids.some((id) => !id)
+      || new Set(ids).size !== ids.length
+      || targets.some((target) => !target.dataset.parentPostPermalink
+        || !target.dataset.fixtureNodeId)) {
     fail("fixture-identity");
     return;
   }
@@ -58,9 +67,14 @@
     const composer = exactlyOne(target, spec.composer);
     const submit = exactlyOne(target, spec.submit);
     const replies = exactlyOne(target, spec.replies);
-    if (!trigger || !composer || !submit || !replies) return null;
+    const exhaustionState = exactlyOne(target, spec.exhaustionState);
+    const author = exactlyOne(target, spec.author);
+    const body = exactlyOne(target, spec.body);
+    if (!trigger || !composer || !submit || !replies || !exhaustionState
+        || !author || !body || !author.dataset.fixtureNodeId
+        || !body.dataset.fixtureNodeId || !exhaustionState.dataset.fixtureNodeId) return null;
     return {
-      target, trigger, composer, submit, replies,
+      target, trigger, composer, submit, replies, exhaustionState,
       commentId: target.getAttribute(spec.id),
     };
   });
@@ -87,7 +101,7 @@
   root.dataset.fixtureRuntimeState = "ready";
 
   for (const entry of controls) {
-    const { trigger, composer, submit, replies, commentId } = entry;
+    const { trigger, composer, submit, replies, exhaustionState, commentId } = entry;
     trigger.addEventListener("click", (event) => {
       event.preventDefault();
       const count = Number.parseInt(root.dataset.replyTriggerAttempts || "0", 10);
@@ -126,6 +140,10 @@
         body.textContent = replyText;
         reply.append(author, body);
         replies.append(reply);
+        const discoveredCount = replies.querySelectorAll(`[${spec.replyAttribute}]`).length;
+        exhaustionState.dataset.replyCursor = `terminal-${discoveredCount}`;
+        exhaustionState.dataset.replyDiscoveredCount = String(discoveredCount);
+        exhaustionState.dataset.replyTerminal = "true";
         const accepted = Number.parseInt(root.dataset.acceptedCount || "0", 10);
         root.dataset.acceptedCount = String(accepted + 1);
         root.dataset.acceptedParentCommentId = commentId;

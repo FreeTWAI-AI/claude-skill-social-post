@@ -11,6 +11,12 @@ from comment_browser_common import (
     _required_boolean, _required_string,
 )
 from comment_domain import stable_id
+from comment_scan_provenance import (
+    ACTION_PROVENANCE_DIGEST_FIELD,
+    DRAFT_PROVENANCE_DIGEST_FIELD,
+    SCAN_PROVENANCE_DIGEST_FIELD,
+    browser_action_provenance_fields,
+)
 from social_validation import parse_time
 
 
@@ -57,7 +63,12 @@ def _require_no_scope_reconciliation(
         if state.get("status") != "needs_reconcile":
             continue
         attempt = state.get("attempt") or {}
-        if attempt.get("session_id") != session_id:
+        reconcile_issuer = state.get("reconcile_capability") or {}
+        active_sessions = {
+            attempt.get("session_id"),
+            reconcile_issuer.get("browser_reconcile_authorized_session_id"),
+        }
+        if session_id not in active_sessions:
             continue
         if _scope_key(attempt.get("scope")) == _scope_key(target_scope):
             raise ValueError(
@@ -84,7 +95,7 @@ def build_browser_action(
         "platform_comment_id": comment.get("platform_comment_id"),
         "comment_permalink": comment.get("comment_permalink"),
     }
-    return {
+    action = {
         "schema_version": 1,
         "action_id": stable_id("browser-action", permit.get("permit_id"), intent_id),
         "intent_id": intent_id,
@@ -102,6 +113,10 @@ def build_browser_action(
         "expires_at": permit.get("expires_at"),
         "submission_boundary": "run browser-begin immediately before one submit action",
         "verification_rule": "exact own-account reply visible under the target comment",
+    }
+    return {
+        **action,
+        **browser_action_provenance_fields(action, draft, comment),
     }
 
 
@@ -208,6 +223,9 @@ def validate_browser_preflight(
         "comment": comment,
         "state": state,
         **preparation,
+        SCAN_PROVENANCE_DIGEST_FIELD: expected_action[SCAN_PROVENANCE_DIGEST_FIELD],
+        DRAFT_PROVENANCE_DIGEST_FIELD: expected_action[DRAFT_PROVENANCE_DIGEST_FIELD],
+        ACTION_PROVENANCE_DIGEST_FIELD: expected_action[ACTION_PROVENANCE_DIGEST_FIELD],
     }
 
 

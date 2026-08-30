@@ -16,6 +16,7 @@ __pycache__/
 *.pyc
 
 # Local social-post data
+social-post/.rd/
 social-post/style_profile.md
 social-post/content_plan.md
 social-post/_scraped_posts_draft.md

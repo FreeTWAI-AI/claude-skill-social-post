@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Canonical post-analysis fields for exact caption/hash, deterministic length, layout and black-card properties, keywords/entities/numeric language, voice/CTA, Unicode punctuation, exact date/weekday/minute/daypart, outcome qualifiers and cross-surface conflicts.
+- A digest-based `coverage` gate proving every eligible post reaches the P0/P2 feature matrix, with an independent exact-compare dimension for every applicable extended analytics subtree and no private caption/path exposure in the audit receipt.
+- Mandatory canonical comparables/context consumption before planning and drafting, with exact platform/maturity/content-type/surface cohorts and non-causal timing treatment.
+- Product-native JavaScript architecture gate with an exact 41-module role manifest, 103 measured internal static edges, one exact reviewed external lazy dependency, cycle detection, required-edge checks and atomic receipt plus detached hash evidence.
+- Eighty calibrated architecture checks covering the exact browser-client source/specifier/kind/cardinality boundary, eager or drifted imports, graph-digest coverage, template-expression parsing, common loader aliases and member calls, inventory drift, role boundaries, receipt path safety and atomic-write failure cases.
+- Explicit internal obligations for a trusted Chrome host resolver and stable node/frame mapping before any authenticated browser canary.
+
+### Changed
+
+- Split the actuator test suite into focused modules and froze the 22-case runner manifest, names and execution order.
+- Split send orchestration from reusable send support while preserving fail-closed claim, reply-exhaustion, reconciliation and recovery behavior.
+- Added post-navigation fixture readiness checks for exact loopback URL, runtime identity, platform/account/post binding and exactly two visible targets.
+- Fixed contenteditable composer readback, cross-realm submit receipts, Threads reply IDs and explicit `test_only` attempt evidence.
+- Stripped private evidence paths from generation context while preserving measurements, and blocked public sync when private path patterns remain.
+- Changed screenshot provenance from order-dependent digests to an exact path-to-SHA-256 manifest in the private ledger; path and digest data remain outside the public export and generation context.
+- Pinned browser-client revision, size and SHA-256 before dynamic import, with missing or drifted runtime bytes failing closed.
+- Reclassified the four browser/live canary obligations as `unmeasured` until their internal host prerequisites and real evidence exist.
+
+### Boundary
+
+- The three-platform Browser journey passed only against localhost fixtures with in-memory test authority. `capability_promotion_eligible` and `live_browser_actuation_enabled` remain `false`; trusted Chrome host resolution, stable live node/frame mapping, authenticated draft-only evidence and live canaries remain open. No authenticated Facebook, Instagram or Threads reply was sent during validation.
+
 ## v2.5.0 — 2026-08-28
 
 ### Added

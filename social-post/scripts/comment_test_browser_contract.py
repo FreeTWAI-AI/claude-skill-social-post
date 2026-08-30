@@ -14,3 +14,8 @@ def run_browser_contract_tests() -> None:
     run_browser_send_contract_tests()
     run_browser_policy_gate_tests()
     run_browser_regression_tests()
+
+
+if __name__ == "__main__":
+    run_browser_contract_tests()
+    print("comment browser contract tests passed")

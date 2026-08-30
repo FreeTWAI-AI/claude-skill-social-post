@@ -67,18 +67,44 @@ def privacy_violations(rows: list[tuple[Path, str]], config: dict) -> list[str]:
             return [f"invalid privacy regex {value!r}: {exc}"]
     failures = []
     for source, relative in rows:
-        try:
-            text = source.read_text(encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            continue
-        lowered = text.casefold()
+        raw = source.read_bytes()
+        decoded_views = [raw.decode("utf-8-sig", errors="ignore"), raw.decode("latin-1")]
+        for encoding in ("utf-16-le", "utf-16-be"):
+            # Scan both alignments so a binary prefix cannot hide UTF-16 text.
+            decoded_views.extend(raw[offset:].decode(encoding, errors="ignore") for offset in (0, 1))
+        lowered_views = [value.casefold() for value in decoded_views]
+        raw_lower = raw.lower()
         for token in tokens:
-            if token.casefold() in lowered:
+            exact_variants = [token.encode(name) for name in ("utf-8", "utf-16-le", "utf-16-be")]
+            folded_variants = [token.casefold().encode(name) for name in ("utf-8", "utf-16-le", "utf-16-be")]
+            byte_match = any(value in raw for value in exact_variants) or any(
+                value in raw_lower for value in folded_variants
+            )
+            if any(token.casefold() in value for value in lowered_views) or byte_match:
                 failures.append(f"{relative}: privacy token {token!r}")
         for pattern in patterns:
-            if pattern.search(text):
+            if any(pattern.search(value) for value in decoded_views):
                 failures.append(f"{relative}: privacy pattern {pattern.pattern!r}")
     return failures
+
+
+def public_tree_rows(destination_root: Path) -> tuple[list[tuple[Path, str]], list[str]]:
+    """Inventory the whole public mirror without following links outside it."""
+    if not destination_root.exists():
+        return [], []
+    rows: list[tuple[Path, str]] = []
+    failures: list[str] = []
+    for path in destination_root.rglob("*"):
+        relative = path.relative_to(destination_root).as_posix()
+        if relative == ".git" or relative.startswith(".git/"):
+            continue
+        is_junction = bool(getattr(path, "is_junction", lambda: False)())
+        if path.is_symlink() or is_junction:
+            failures.append(f"public/{relative}: linked public path is not allowed")
+            continue
+        if path.is_file():
+            rows.append((path, f"public/{relative}"))
+    return sorted(rows, key=lambda row: row[1]), sorted(failures)
 
 
 def managed_paths(destination_root: Path) -> set[str]:
@@ -92,12 +118,64 @@ def managed_paths(destination_root: Path) -> set[str]:
     return set(paths)
 
 
+def forbidden_public_paths(config: dict) -> set[str]:
+    """Return exact private-only paths that must not survive in the public mirror."""
+    values = config.get("sync", {}).get("forbid_public", [])
+    if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
+        raise ValueError("sync.forbid_public must be a list of exact relative paths")
+    result: set[str] = set()
+    for raw in values:
+        relative = raw.replace("\\", "/").strip("/")
+        if not relative or relative == MANIFEST_NAME or any(char in relative for char in "*?["):
+            raise ValueError(f"invalid exact sync.forbid_public path: {raw!r}")
+        if relative == ".git" or relative.startswith(".git/"):
+            raise ValueError("sync.forbid_public cannot target .git")
+        result.add(relative)
+    return result
+
+
+def public_generated_cache_paths(config: dict) -> set[str]:
+    """Return exact, explicitly configured generated-cache directories."""
+    values = config.get("sync", {}).get("purge_public_generated", [])
+    if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
+        raise ValueError("sync.purge_public_generated must be a list of exact relative paths")
+    result: set[str] = set()
+    for raw in values:
+        relative = raw.replace("\\", "/").strip("/")
+        if (
+            not relative
+            or relative == MANIFEST_NAME
+            or any(char in relative for char in "*?[")
+            or Path(relative).name != "__pycache__"
+        ):
+            raise ValueError(f"invalid exact sync.purge_public_generated path: {raw!r}")
+        if relative == ".git" or relative.startswith(".git/"):
+            raise ValueError("sync.purge_public_generated cannot target .git")
+        result.add(relative)
+    return result
+
+
 def safe_destination(destination_root: Path, relative: str) -> Path:
     destination = (destination_root / relative).resolve()
     root = destination_root.resolve()
     if destination != root and root not in destination.parents:
         raise ValueError(f"sync path escapes public root: {relative}")
     return destination
+
+
+def purge_public_generated(destination_root: Path, config: dict) -> list[str]:
+    """Remove only configured, in-root Python cache directories."""
+    removed: list[str] = []
+    for relative in sorted(public_generated_cache_paths(config)):
+        destination = safe_destination(destination_root, relative)
+        if not destination.exists():
+            continue
+        is_junction = bool(getattr(destination, "is_junction", lambda: False)())
+        if destination.is_symlink() or is_junction or not destination.is_dir():
+            raise ValueError(f"invalid generated-cache target: {relative}")
+        shutil.rmtree(destination)
+        removed.append(relative)
+    return removed
 
 
 def write_manifest(destination_root: Path, paths: list[str]) -> None:
@@ -123,8 +201,32 @@ def main() -> int:
         for violation in violations:
             print(violation)
         return 2
+    removed_generated: list[str] = []
+    if args.write:
+        try:
+            removed_generated = purge_public_generated(destination_root, config)
+        except ValueError as exc:
+            print(f"BLOCK public_root={destination_root} generated_cache_error={exc}")
+            return 2
+    public_rows, public_tree_failures = public_tree_rows(destination_root)
+    violations.extend(public_tree_failures)
+    violations.extend(privacy_violations(public_rows, config))
+    if violations:
+        print(f"BLOCK public_root={destination_root} privacy_violations={len(violations)}")
+        for violation in violations:
+            print(violation)
+        return 2
     current = [relative for _source, relative in rows]
-    stale = sorted(managed_paths(destination_root) - set(current))
+    forbidden = forbidden_public_paths(config)
+    forbidden_existing = set()
+    for relative in forbidden:
+        destination = safe_destination(destination_root, relative)
+        if destination.exists():
+            if not destination.is_file() or destination.is_symlink():
+                print(f"BLOCK public_root={destination_root} invalid_forbidden_target={relative}")
+                return 2
+            forbidden_existing.add(relative)
+    stale = sorted((managed_paths(destination_root) - set(current)) | forbidden_existing)
     changed = []
     for source, relative in rows:
         destination = safe_destination(destination_root, relative)
@@ -144,6 +246,8 @@ def main() -> int:
         print(relative)
     for relative in stale:
         print(f"STALE {relative}")
+    for relative in removed_generated:
+        print(f"REMOVED_GENERATED {relative}")
     return 0
 
 

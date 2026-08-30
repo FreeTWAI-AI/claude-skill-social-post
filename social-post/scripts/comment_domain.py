@@ -18,6 +18,9 @@ from comment_authorization import (
     validate_grant_shape,
     validate_scope,
 )
+from comment_browser_provenance import (
+    validate_capability_metadata_shape, validate_consumption_shape,
+)
 from comment_identity import (
     IDENTITY_CONFIDENCE,
     PLATFORMS,
@@ -28,15 +31,23 @@ from comment_identity import (
     stable_id,
     validate_comment_events,
 )
+from comment_reply_validation import (
+    EVENT_TYPES,
+    REPLY_EVENT_TYPES,
+    RISK_LEVELS,
+    validate_reply_event_shape as _validate_reply_event_shape,
+)
+from comment_scan_provenance import (
+    ACTION_PROVENANCE_DIGEST_FIELD,
+    DRAFT_PROVENANCE_DIGEST_FIELD,
+    SCAN_PROVENANCE_DIGEST_FIELD,
+    draft_provenance_fields,
+    validate_draft_provenance_binding,
+    validate_send_provenance_binding,
+)
 from social_validation import parse_time
 
 
-RISK_LEVELS = {"low", "medium", "high"}
-REPLY_EVENT_TYPES = {
-    "drafted", "approved", "send_started", "sent_verified", "needs_reconcile",
-    "reconciled_sent", "reconciled_not_sent", "failed", "deferred", "skipped", "revoked",
-}
-EVENT_TYPES = REPLY_EVENT_TYPES | GRANT_EVENT_TYPES
 TERMINAL_STATES = {"sent_verified", "reconciled_sent", "skipped"}
 
 
@@ -59,6 +70,11 @@ def normalize_reply_event(
     result["audit_id"] = value.get("audit_id") or stable_id(
         "reply-audit", event_type, result.get("intent_id"), comment_key, occurred_at,
         result.get("reply_hash"), result.get("permit_id"), result.get("grant_id"),
+        result.get("browser_receipt_capability_id"),
+        result.get("browser_reconcile_capability_id"),
+        result.get(SCAN_PROVENANCE_DIGEST_FIELD),
+        result.get(DRAFT_PROVENANCE_DIGEST_FIELD),
+        result.get(ACTION_PROVENANCE_DIGEST_FIELD),
     )
     return result
 
@@ -90,105 +106,14 @@ def _normalize_draft_event(
         "reply-intent", result["comment_key"], result["occurred_at"], result["reply_hash"],
     )
     result.setdefault("policy_version", 1)
-
-
-def _validate_draft_shape(row: dict[str, Any], label: str, errors: list[str]) -> None:
-    required = (
-        "reply_text", "reply_hash", "classification", "risk", "confidence",
-        "comment_fingerprint", "language", "policy_version",
-    )
-    for key in required:
-        if key not in row:
-            errors.append(f"{label} drafted event missing {key}")
-    text = row.get("reply_text")
-    if not isinstance(text, str) or not text:
-        errors.append(f"{label} reply_text must be non-empty")
-    elif "\n" in text or "\r" in text:
-        errors.append(f"{label} reply_text must be a single line")
-    elif row.get("reply_hash") != reply_hash(text):
-        errors.append(f"{label} reply_hash does not match reply_text")
-    if row.get("risk") not in RISK_LEVELS:
-        errors.append(f"{label} risk must be one of {sorted(RISK_LEVELS)}")
-    confidence = row.get("confidence")
-    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
-        errors.append(f"{label} confidence must be from 0..1")
-    elif not 0 <= confidence <= 1:
-        errors.append(f"{label} confidence must be from 0..1")
-    if not isinstance(row.get("language"), str) or not row.get("language", "").strip():
-        errors.append(f"{label} language must be a non-empty string")
-    version = row.get("policy_version")
-    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
-        errors.append(f"{label} policy_version must be a positive integer")
-
-
-def _validate_outcome_shape(
-    row: dict[str, Any], event_type: str, label: str, errors: list[str],
-) -> None:
-    if event_type == "send_started":
-        required = ("permit_id", "session_id", "reply_hash", "comment_fingerprint", "scope")
-        for key in required:
-            if key not in row:
-                errors.append(f"{label} send_started event missing {key}")
-        validate_scope(row.get("scope"), label, errors, include_comment=True)
-        browser_binding = (
-            "browser_action_id", "browser_preflight_id", "browser_preparation_id",
-            "browser_action_digest", "browser_plan_digest", "browser_submit_claim_id",
+    if comment:
+        expected = draft_provenance_fields(
+            comment, intent_id=result["intent_id"], comment_key=result["comment_key"],
+            comment_fingerprint=result["comment_fingerprint"],
+            reply_hash=result["reply_hash"],
         )
-        if any(row.get(key) for key in browser_binding):
-            require_non_empty_strings(row, browser_binding, label, errors)
-            baseline_total = row.get("browser_baseline_total_reply_count")
-            if (
-                not isinstance(baseline_total, int)
-                or isinstance(baseline_total, bool)
-                or baseline_total < 0
-            ):
-                errors.append(
-                    f"{label} browser_baseline_total_reply_count must be a non-negative integer"
-                )
-    elif event_type == "sent_verified":
-        require_non_empty_strings(row, ("session_id", "browser_evidence"), label, errors)
-    elif event_type in {"reconciled_sent", "reconciled_not_sent"}:
-        require_non_empty_strings(
-            row, ("session_id", "attempt_session_id", "browser_evidence"), label, errors,
-        )
-        if row.get("reconciliation_basis") != "browser_reinspection":
-            errors.append(f"{label} reconciliation_basis must be browser_reinspection")
-    else:
-        _validate_other_outcome(row, event_type, label, errors)
-
-
-def _validate_other_outcome(
-    row: dict[str, Any], event_type: str, label: str, errors: list[str],
-) -> None:
-    if event_type == "failed":
-        require_non_empty_strings(row, ("session_id",), label, errors)
-        if row.get("submission_possible") is not False:
-            errors.append(f"{label} failed is allowed only when submission_possible is false")
-    elif event_type == "needs_reconcile":
-        require_non_empty_strings(row, ("session_id", "reason_code"), label, errors)
-    elif event_type in {"deferred", "skipped", "revoked"}:
-        require_non_empty_strings(row, ("reason_code",), label, errors)
-
-
-def _validate_reply_event_shape(row: dict[str, Any], label: str, errors: list[str]) -> None:
-    event_type = row.get("event_type")
-    require_non_empty_strings(row, ("audit_id", "event_type", "occurred_at"), label, errors)
-    if event_type not in GRANT_EVENT_TYPES:
-        require_non_empty_strings(row, ("intent_id", "comment_key"), label, errors)
-    if event_type not in EVENT_TYPES:
-        errors.append(f"{label} invalid event_type {event_type}")
-    try:
-        parse_time(row.get("occurred_at", ""))
-    except ValueError:
-        errors.append(f"{label} occurred_at must be ISO 8601 with UTC offset")
-    if event_type in GRANT_EVENT_TYPES:
-        validate_grant_shape(row, str(event_type), label, errors)
-    elif event_type == "drafted":
-        _validate_draft_shape(row, label, errors)
-    elif event_type == "approved":
-        validate_approval_shape(row, label, errors)
-    else:
-        _validate_outcome_shape(row, str(event_type), label, errors)
+        for key, expected_value in expected.items():
+            result[key] = value.get(key, expected_value)
 
 
 def _comment_at(
@@ -225,6 +150,10 @@ def _validate_comment_guards(
         errors.append(f"{label} cannot approve a reply to own comment")
     if comment.get("has_own_reply"):
         errors.append(f"{label} cannot approve a comment that already has own reply")
+    try:
+        validate_draft_provenance_binding(draft, comment)
+    except ValueError as exc:
+        errors.append(f"{label} {exc}")
 
 
 def _validate_approval_context(
@@ -281,7 +210,10 @@ def _apply_send_started(
     _validate_send_comment(row, draft, comment, label, errors)
     if row.get("scope") != permit.get("scope"):
         errors.append(f"{label} send scope differs from approval")
-    current.update(status="send_started", last_event=row, attempt=row, permit=None)
+    current.update(
+        status="send_started", last_event=row, attempt=row, permit=None,
+        reconcile_capability=None,
+    )
 
 
 def _validate_send_expiry(
@@ -302,6 +234,14 @@ def _validate_send_comment(
         errors.append(f"{label} visible comment changed before send")
     if comment is None or draft.get("comment_fingerprint") != comment.get("raw_fingerprint"):
         errors.append(f"{label} approved draft is stale")
+    if comment is None:
+        return
+    try:
+        validate_draft_provenance_binding(draft, comment)
+        if row.get("browser_action_id"):
+            validate_send_provenance_binding(row, draft, comment)
+    except ValueError as exc:
+        errors.append(f"{label} {exc}")
 
 
 def _apply_finish(
@@ -314,7 +254,10 @@ def _apply_finish(
     elif row.get("session_id") != (current.get("attempt") or {}).get("session_id"):
         errors.append(f"{label} finish session_id does not match send attempt")
     else:
-        current.update(status=event_type, last_event=row, permit=None)
+        current.update(
+            status=event_type, last_event=row, permit=None,
+            reconcile_capability=row if event_type == "needs_reconcile" else None,
+        )
 
 
 def _apply_reconciliation(
@@ -329,7 +272,70 @@ def _apply_reconciliation(
     elif row.get("reconciliation_basis") != "browser_reinspection":
         errors.append(f"{label} reconciliation requires browser_reinspection")
     else:
-        current.update(status=event_type, last_event=row, permit=None)
+        current.update(
+            status=event_type, last_event=row, permit=None,
+            reconcile_capability=None,
+        )
+
+
+def _apply_reinspection_observed(
+    current: dict[str, Any], row: dict[str, Any], label: str, errors: list[str],
+) -> None:
+    if current.get("status") != "needs_reconcile":
+        errors.append(
+            f"{label} cannot record browser_reinspection_observed "
+            f"from {current.get('status')}"
+        )
+    elif row.get("attempt_session_id") != (current.get("attempt") or {}).get("session_id"):
+        errors.append(f"{label} reinspection attempt session differs from send attempt")
+    else:
+        current.update(
+            status="needs_reconcile", last_event=row, reconcile_capability=row,
+        )
+
+
+def _apply_reconcile_recovery(
+    current: dict[str, Any], row: dict[str, Any], label: str, errors: list[str],
+) -> None:
+    """Move an authoritative uncertain attempt onto a fresh reconcile-only bearer."""
+    status = current.get("status")
+    if status not in {"send_started", "needs_reconcile"}:
+        errors.append(f"{label} cannot recover reconcile authority from {status}")
+        return
+    attempt = current.get("attempt") or {}
+    attempt_session_id = attempt.get("session_id")
+    if row.get("attempt_session_id") != attempt_session_id:
+        errors.append(f"{label} recovery attempt session differs from send attempt")
+    current_issuer = (
+        current.get("reconcile_capability") if status == "needs_reconcile" else attempt
+    ) or {}
+    previous_session = current_issuer.get(
+        "browser_reconcile_authorized_session_id"
+    )
+    recovery_session = row.get("session_id")
+    if recovery_session in {attempt_session_id, previous_session}:
+        errors.append(f"{label} recovery requires a fresh current session")
+    if row.get("browser_reconcile_authorized_session_id") != recovery_session:
+        errors.append(f"{label} recovery capability session binding differs")
+    if row.get("reason_code") == "receipt_capability_expired":
+        expiry_key = (
+            "browser_reconcile_capability_expires_at"
+            if status == "needs_reconcile"
+            else "browser_finish_capability_expires_at"
+        )
+        try:
+            if parse_time(str(current_issuer.get(expiry_key, ""))) > parse_time(
+                str(row.get("occurred_at", ""))
+            ):
+                errors.append(f"{label} recovery capability has not expired")
+        except ValueError:
+            errors.append(f"{label} recovery has no authoritative capability expiry")
+    if errors and any(error.startswith(label) for error in errors):
+        return
+    current.update(
+        status="needs_reconcile", last_event=row, permit=None,
+        reconcile_capability=row,
+    )
 
 
 def _apply_disposition(
@@ -358,6 +364,10 @@ def _apply_reply_transition(
         _apply_finish(current, row, str(event_type), label, errors)
     elif event_type in {"reconciled_sent", "reconciled_not_sent"}:
         _apply_reconciliation(current, row, str(event_type), label, errors)
+    elif event_type == "browser_reinspection_observed":
+        _apply_reinspection_observed(current, row, label, errors)
+    elif event_type == "reconcile_recovery_issued":
+        _apply_reconcile_recovery(current, row, label, errors)
     elif event_type in {"deferred", "skipped"}:
         _apply_disposition(current, row, str(event_type), label, errors)
     elif event_type == "revoked":
@@ -427,6 +437,7 @@ def _apply_draft(
     states[comment_key] = {
         "status": "drafted", "intent_id": intent_id, "draft": row,
         "last_event": row, "permit": None, "attempt": None,
+        "reconcile_capability": None,
     }
 
 
