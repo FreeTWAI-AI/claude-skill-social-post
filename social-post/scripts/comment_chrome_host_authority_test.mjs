@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { instagramUrlIdentity, sameInstagramPostUrl } from "./comment_chrome_common.mjs";
 
 import {
   TRUSTED_CHROME_HOST_RESOLVER_VERSION,
@@ -136,6 +137,28 @@ for (const settleMs of [-1, 10001, 0.5, "0", null]) {
   );
 }
 
+for (const kind of ["p", "reel", "reels", "tv"]) {
+  const post_permalink = `https://www.instagram.com/${kind}/ABC123/`;
+  assert.equal(sameInstagramPostUrl(post_permalink, TARGETS.instagram.post_permalink), true);
+  // Invalid settle options are checked after URL validation but before runtime
+  // loading, proving each accepted alias without opening a browser.
+  await assert.rejects(
+    () => captureChromeAccessibleSnapshotPair({ ...TARGETS.instagram, post_permalink }, { settleMs: -1 }),
+    /settleMs must be an integer/u,
+  );
+}
+assert.equal(sameInstagramPostUrl("https://www.instagram.com/p/OTHER", TARGETS.instagram.post_permalink), false);
+assert.equal(sameInstagramPostUrl("https://instagram.com/p/ABC123", TARGETS.instagram.post_permalink), false);
+assert.equal(sameInstagramPostUrl("https://www.instagram.com/p/ABC123?igsh=other", TARGETS.instagram.post_permalink), false);
+for (const path of ["/p/p/ABC123", "/p/ABC123/c/123", "/p/ABC123/../OTHER", "/p/ABC123%2FOTHER"]) {
+  assert.throws(() => instagramUrlIdentity(`https://www.instagram.com${path}`));
+}
+for (const query of ["comment_id=123", "replyId=123", "x=1&x=1", "x=1&X=2"]) {
+  assert.throws(() => sameInstagramPostUrl(
+    `https://www.instagram.com/p/ABC123?${query}`, `https://www.instagram.com/reels/ABC123?${query}`,
+  ));
+}
+
 await assert.rejects(
   () => verifyTrustedChromeHostStillCurrent(
     Object.freeze({ schema_version: 2 }), TARGETS.facebook,
@@ -205,8 +228,8 @@ assert.deepEqual(
   [".goto(expectedUrl)"],
 );
 assert.deepEqual(runtimeSource.match(/\.tabs\.new\s*\([^)]*\)/gu), [".tabs.new()"]);
-assert.match(captureSource, /if \(!sameUrl\(beforeUrl, expectedUrl\)\)/u);
-assert.match(captureSource, /if \(!sameUrl\(afterUrl, expectedUrl\) \|\| !sameUrl\(afterUrl, beforeUrl\)\)/u);
+assert.match(captureSource, /if \(!sameApprovedPostUrl\(beforeUrl, expectedUrl\)\)/u);
+assert.match(captureSource, /if \(!sameApprovedPostUrl\(afterUrl, expectedUrl\) \|\| !sameUrl\(afterUrl, beforeUrl\)\)/u);
 assert.match(captureSource, /exact_navigation_count: 1/u);
 assert.match(captureSource, /page_mutation_count: 0/u);
 assert.match(captureSource, /tab_cleanup_required: true/u);

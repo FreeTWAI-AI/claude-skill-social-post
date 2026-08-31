@@ -133,7 +133,9 @@ def scan_envelope(adapter: LocalFixtureCommentAdapter) -> dict:
     platform = adapter.spec.platform
     page_url = PLATFORM_URLS[platform]
     comment_permalink = f"{page_url}/comment/{comment['platform_comment_id']}"
-    if platform == "threads":
+    if platform == "instagram":
+        comment_permalink = f"{page_url}/c/{comment['platform_comment_id']}"
+    elif platform == "threads":
         author = comment.get("author_key") or comment.get("author_display") or "fixture_author"
         comment_permalink = (
             f"https://www.threads.com/@{author}/post/{comment['platform_comment_id']}"

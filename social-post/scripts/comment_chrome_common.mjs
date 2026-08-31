@@ -80,6 +80,42 @@ export function canonicalUrl(raw, { allowLoopbackPort = false } = {}) {
   return url;
 }
 
+/** Same-media aliases do not authorize another host, query, or comment. */
+export function instagramUrlIdentity(raw, { allowComment = false } = {}) {
+  const input = requiredString(raw, "Instagram URL");
+  const url = canonicalUrl(input);
+  if (url.protocol !== "https:" || !LIVE_HOSTS.instagram.has(url.hostname)) {
+    fail("Instagram URL is not on a trusted HTTPS host");
+  }
+  const rawPath = input.match(/^https:\/\/[^/?#]+([^?#]*)/iu)?.[1]?.replace(/\/+$/u, "");
+  if (rawPath !== url.pathname) fail("Instagram URL path is ambiguous");
+  const post = url.pathname.match(/^\/(?:([A-Za-z0-9._]+)\/)?(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)$/u);
+  const comment = allowComment
+    ? url.pathname.match(/^\/p\/([A-Za-z0-9_-]+)\/c\/([A-Za-z0-9_-]+)$/u) : null;
+  if ((!post || /^(?:p|reel|reels|tv|c)$/u.test(post[1] ?? "")) && !comment) {
+    fail("Instagram URL is not a supported post or native comment permalink");
+  }
+  const keys = new Set();
+  for (const [key] of url.searchParams) {
+    const normalized = key.toLowerCase();
+    if (keys.has(normalized) || /^(?:id|comment_?id|reply_?id|media_?id|shortcode)$/u.test(normalized)) {
+      fail("Instagram URL query contains duplicate or ambiguous identifiers");
+    }
+    keys.add(normalized);
+  }
+  return Object.freeze({
+    url: url.toString(), hostname: url.hostname, query: url.search,
+    shortcode: comment ? comment[1] : post[2], commentId: comment?.[2] ?? null,
+  });
+}
+
+export function sameInstagramPostUrl(observed, expected) {
+  const current = instagramUrlIdentity(observed);
+  const target = instagramUrlIdentity(expected);
+  return current.hostname === target.hostname && current.shortcode === target.shortcode
+    && current.query === target.query;
+}
+
 function sameApprovedUrl(observed, expected) {
   return observed.protocol === expected.protocol
     && observed.hostname === expected.hostname

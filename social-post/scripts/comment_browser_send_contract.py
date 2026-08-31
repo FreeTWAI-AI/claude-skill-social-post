@@ -257,18 +257,20 @@ def _require_preparation_binding(
 
 
 def _require_send_observed_url(comment: dict[str, Any], observed_url: str) -> str:
-    """Allow only the approved post or its exact stored Threads reply anchor.
+    """Allow the approved post (including IG aliases) or its stored reply anchor.
 
     Threads reply pages show the original parent and target comment together.
     Their separate path is acceptable only when the ledger already binds that
     exact query-free anchor to the approved parent; receipt fields cannot add a
-    new target. Other platforms retain the original post-only rule.
+    new target. Instagram's native anchor must bind the same shortcode and
+    stored comment ID. Facebook retains the original post-only rule.
     """
     platform = comment["platform"]
     post_permalink = comment["post_permalink"]
-    if platform == "threads" and comment.get("comment_permalink"):
+    if platform in {"threads", "instagram"} and comment.get("comment_permalink"):
         stored_anchor = _require_comment_permalink_for_post(
             platform, _required_string(comment, "comment_permalink"), post_permalink,
+            comment.get("platform_comment_id"),
         )
         current = _require_platform_url(platform, observed_url, "observed_url")
         if current == stored_anchor:

@@ -15,7 +15,9 @@ import {
   canonicalUrl,
   fail,
   immutableJsonSnapshot,
+  instagramUrlIdentity,
   requiredString,
+  sameInstagramPostUrl,
 } from "./comment_chrome_common.mjs";
 import {
   chromeRuntimeAuthorityDescriptor,
@@ -32,7 +34,7 @@ const HOST_INTERNAL = new WeakMap();
 
 const POST_PATH_RULES = Object.freeze({
   facebook: /(?:\/posts\/|\/videos\/|^\/reel\/|^\/watch\/|^\/(?:permalink|story)\.php$|^\/photo\/)/u,
-  instagram: /^\/(?:[^/]+\/)?(?:p|reel|tv)\/[^/]+$/u,
+  instagram: /^\/(?:[A-Za-z0-9._]+\/)?(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+$/u,
   threads: /^\/@[^/]+\/post\/[^/]+$/u,
 });
 
@@ -50,6 +52,11 @@ function sameUrl(left, right) {
   return canonicalString(left) === canonicalString(right);
 }
 
+function sameApprovedPostUrl(observed, expected) {
+  return LIVE_HOSTS.instagram.has(canonicalUrl(expected).hostname)
+    ? sameInstagramPostUrl(observed, expected) : sameUrl(observed, expected);
+}
+
 function assertTrustedPostPermalink(platform, raw) {
   const url = canonicalUrl(raw);
   if (url.protocol !== "https:" || !LIVE_HOSTS[platform]?.has(url.hostname)) {
@@ -58,6 +65,7 @@ function assertTrustedPostPermalink(platform, raw) {
   if (!POST_PATH_RULES[platform].test(url.pathname)) {
     fail(`approved ${platform} URL is not a supported post permalink`);
   }
+  if (platform === "instagram") instagramUrlIdentity(raw);
   return url.toString();
 }
 
@@ -96,8 +104,8 @@ async function observeStablePair(session, target) {
   const sessionDescriptor = session.describeExistingSession();
   const first = await session.inspectStableHost(target);
   const second = await session.inspectStableHost(target);
-  if (!sameUrl(first.observed_url, target.post_permalink)
-      || !sameUrl(second.observed_url, target.post_permalink)) {
+  if (!sameApprovedPostUrl(first.observed_url, target.post_permalink)
+      || !sameApprovedPostUrl(second.observed_url, target.post_permalink)) {
     fail("trusted host observation differs from the approved post permalink");
   }
   const firstTopology = topologyDigest(first);

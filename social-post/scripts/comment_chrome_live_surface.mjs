@@ -1,8 +1,8 @@
 /** Source-owned, read-only Meta reply inspection. No network or submit actions. */
-import { canonicalUrl, fail, LIVE_HOSTS, requiredString, unique } from "./comment_chrome_common.mjs";
+import { canonicalUrl, fail, instagramUrlIdentity, LIVE_HOSTS, requiredString, unique } from "./comment_chrome_common.mjs";
 import { assertAction, bindObservedSubmitNode } from "./comment_chrome_send_support.mjs";
 
-export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.1";
+export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.2";
 const inspectionBrowsers = new WeakMap();
 
 /** Called only with the source-owned runtime browser by the fused bridge. */
@@ -22,7 +22,7 @@ async function verifyFacebookAccount(tab, action) {
     for (let pass = 0; pass < 3; pass += 1) {
       current = trustedUrl("facebook", await probe.url());
       if (current.pathname !== "/me") break;
-      // Reading the page title waits for the in-flight profile navigation, not
+      // Reading the banner waits for the in-flight profile navigation, not
       // a network/API request or a page-private application-state inspection.
       await probe.playwright.getByRole("banner").count();
     }
@@ -57,6 +57,16 @@ export function liveReplyUrl(action) {
         && target.pathname.split("/").at(-1) !== action.comment_anchor.platform_comment_id) {
       fail("Threads comment id and permalink differ");
     }
+  } else if (platform === "instagram") {
+    const parent = instagramUrlIdentity(action.post_permalink);
+    const comment = instagramUrlIdentity(raw || action.post_permalink, { allowComment: true });
+    if (comment.shortcode !== parent.shortcode || comment.query !== parent.query) {
+      fail("Instagram reply URL differs from the approved post identity");
+    }
+    if (raw && !comment.commentId) fail("Instagram reply requires a native comment permalink");
+    if (comment.commentId && comment.commentId !== requiredString(
+      action.comment_anchor.platform_comment_id, "Instagram comment id",
+    )) fail("Instagram comment id and permalink differ");
   } else {
     if (target.pathname !== post.pathname && !target.pathname.startsWith(`${post.pathname}/`)) {
       fail("reply URL is outside the approved post path");
@@ -256,11 +266,94 @@ async function inspectFacebook(tab, action, phase) {
   return { ...base, composer, submit: form.getByRole("button", { name: "貼文留言", exact: true }) };
 }
 
+async function inspectInstagram(tab, action, phase) {
+  const observedUrl = await currentUrl(tab, action);
+  const identity = instagramUrlIdentity(liveReplyUrl(action), { allowComment: true });
+  if (!identity.commentId) fail("Instagram inspection requires its native comment permalink");
+  const account = requiredString(action.scope.account_key, "Instagram account").replace(/^@/u, "");
+  const accountEvidence = await tab.playwright.evaluate((expected) => {
+    const links = [...document.querySelectorAll('a[href]')].filter((a) => {
+      if (a.closest('main,[role="dialog"]') || !a.querySelector('img[alt$="的大頭貼照"]')) return false;
+      for (let p = a.parentElement, depth = 0; p && depth < 7; p = p.parentElement, depth += 1) {
+        if (p.querySelector('main,article,[role="dialog"]')) break;
+        if (['首頁', '搜尋', '新貼文'].every((label) => p.querySelector(`svg[aria-label="${label}"]`))) return true;
+      }
+      return false;
+    });
+    return links.length > 0 && links.length <= 4 && links.every((a) =>
+      a.getAttribute("href") === `/${expected}/`
+      && a.querySelector('img')?.getAttribute("alt") === `${expected}的大頭貼照`)
+      && links.some((a) => a.getClientRects().length > 0);
+  }, account);
+  if (!accountEvidence) fail("Instagram active account navigation changed");
+  const article = await unique(tab.playwright.locator("article"), "Instagram native post article");
+  const anchorPath = `/p/${identity.shortcode}/c/${identity.commentId}/`;
+  const target = article.locator("li").filter({ has: tab.playwright.locator(`a[href=${JSON.stringify(anchorPath)}]`) });
+  await unique(target, "Instagram native parent comment");
+  const evidence = await target.evaluate((li, expected) => {
+    const norm = (s) => String(s ?? "").normalize("NFC").replace(/\s+/gu, " ").trim();
+    // Native comment-page layout: H3 author, whole body sibling, controls sibling.
+    // Never accept an exact descendant fragment from a longer comment.
+    const read = (item) => {
+      const headings = [...item.querySelectorAll("h3")].filter((h) => h.closest("li") === item);
+      if (headings.length !== 1) return null;
+      const heading = headings[0];
+      const body = heading.nextElementSibling;
+      const controls = body?.nextElementSibling;
+      const links = [...heading.querySelectorAll('a[href]')];
+      if (!body || !controls || links.length !== 1 || body.tagName !== "DIV"
+          || !controls.querySelector('a[href] time')
+          || body.querySelector('button,[role="button"]')) return null;
+      const handle = links[0].getAttribute("href").match(/^\/([A-Za-z0-9._]+)\/$/u)?.[1];
+      const anchors = [...controls.querySelectorAll('a[href]')].filter((a) => a.querySelector("time"));
+      if (!handle || anchors.length !== 1 || !body.getClientRects().length) return null;
+      return { author: handle, body: norm(body.innerText), path: anchors[0].getAttribute("href") };
+    };
+    const parent = read(li);
+    if (!parent || parent.path !== expected.path || parent.author !== expected.author
+        || parent.body !== norm(expected.body)) return { valid: false };
+    const thread = li.closest("ul");
+    if (!thread) return { valid: false };
+    const children = [...thread.querySelectorAll("li")].filter((item) => item !== li);
+    const replies = [];
+    for (const item of children) {
+      if (![...item.querySelectorAll("h3")].some((h) => h.closest("li") === item)) continue;
+      const row = read(item);
+      if (!row || !row.path.startsWith(`${expected.path}r/`)
+          || !/^\d+\/$/u.test(row.path.slice(`${expected.path}r/`.length))) return { valid: false };
+      replies.push(row);
+    }
+    const own = replies.filter((row) => row.author === expected.account);
+    return { valid: true, totalReplies: replies.length, ownReplyCount: own.length,
+      exactOwnCount: own.filter((row) => row.body === norm(expected.reply)).length,
+      expansionPending: /查看回覆|查看全部.*回覆|載入中/u.test(thread.innerText) };
+  }, { path: anchorPath, author: action.author_key, body: action.expected_body,
+    account, reply: action.reply_text });
+  if (!evidence.valid) fail("Instagram native parent, author or complete body changed");
+  // Native /c/P/r/R anchors prove observed child ownership, not exhaustive
+  // pagination or the selected reply state of the shared post-level textarea.
+  // In particular, an @author prefill is not sufficient parent-state evidence.
+  const base = { observedUrl, complete: false, totalReplies: evidence.totalReplies,
+    ownReplyCount: evidence.ownReplyCount, exactOwnCount: evidence.exactOwnCount,
+    expansionPending: evidence.expansionPending,
+    blockedReason: "instagram_reply_exhaustion_and_selected_parent_not_verified" };
+  if (phase === "after") return base;
+  const composer = article.getByRole("textbox", { name: "留言⋯⋯", exact: true });
+  await unique(composer, "Instagram shared comment editor");
+  const form = article.locator("form").filter({
+    has: tab.playwright.getByRole("textbox", { name: "留言⋯⋯", exact: true }),
+  });
+  await unique(form, "Instagram comment form");
+  return { ...base, trigger: target.getByRole("button", { name: "回覆", exact: true }),
+    composer, submit: form.getByRole("button", { name: "發佈", exact: true }) };
+}
+
 export async function inspectLiveReplySurface(tab, action, phase = "before") {
   assertAction(action);
   if (!["before", "after"].includes(phase)) fail("unknown live reply inspection phase");
   if (action.scope.platform === "threads") return inspectThreads(tab, action, phase);
   if (action.scope.platform === "facebook") return inspectFacebook(tab, action, phase);
+  if (action.scope.platform === "instagram") return inspectInstagram(tab, action, phase);
   fail(`${action.scope.platform} live reply surface has not been verified`);
 }
 

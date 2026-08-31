@@ -12,7 +12,8 @@ Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime 
 
 - 新增 default-only `executeApprovedReply` 候選入口與 read-only recovery，拒絕 caller tab／action／selector／callback；原核准文字、帳號、貼文、留言及原 attempt 都必須一致。
 - 更新 Codex Chrome runtime 固定版本至 `26.825.51511`，保留 bytes／SHA-256 驗證。
-- Threads 的指定樣本已核對原留言、完整本文、帳號、零回覆與回覆視窗；未實際送出。FB 僅完成既有自己回覆的辨識，完整展開與 composer actor 未驗證，因此禁止送出；IG live reply adapter 尚未完成。
+- Threads 的指定樣本已核對原留言、完整本文、帳號、零回覆與回覆視窗；未實際送出。FB 已辨識既有自己回覆；IG 新增原生留言頁的帳號、完整本文、父子留言與編輯器只讀驗證，錯帳號／作者／截短本文均拒絕。FB／IG 完整展開與編輯器選定父層尚未驗證，仍禁止送出。
+- 修正 Facebook story query 身分保留與完整度判定；支援 Instagram 同一 shortcode 的 `p/reel/reels/tv` 網址及 `/p/S/c/P` 留言，拒絕跨貼文、重複或矛盾識別欄位。IG 內顯示的 Facebook 留言數不得混入 IG 掃描。
 - 公開版本只含通用程式與匿名測試。真實留言、草稿、帳號洞察、原文、照片與私人憑證不在發布範圍內。
 
 - 結構化分析不只保存成效數字，也保存原文 SHA、確定性長度、版型／黑底白字屬性、關鍵字、實體、數字語言、voice、CTA、完整 Unicode 標點，以及日期、星期、`HH:mm` 與 daypart。

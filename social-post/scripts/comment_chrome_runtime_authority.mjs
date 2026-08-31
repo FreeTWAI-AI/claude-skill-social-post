@@ -16,7 +16,9 @@ import {
   canonicalUrl,
   fail,
   immutableJsonSnapshot,
+  instagramUrlIdentity,
   requiredString,
+  sameInstagramPostUrl,
   unique,
 } from "./comment_chrome_common.mjs";
 
@@ -30,7 +32,7 @@ const EXISTING_CHROME_READ_SESSIONS = new WeakSet();
 const READ_SESSION_INTERNAL = new WeakMap();
 const META_POST_PATH_RULES = Object.freeze({
   facebook: /(?:\/posts\/|\/videos\/|^\/reel\/|^\/watch\/|^\/(?:permalink|story)\.php$|^\/photo\/)/u,
-  instagram: /^\/(?:[^/]+\/)?(?:p|reel|tv)\/[^/]+$/u,
+  instagram: /^\/(?:[A-Za-z0-9._]+\/)?(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+$/u,
   threads: /^\/@[^/]+\/post\/[^/]+$/u,
 });
 
@@ -89,6 +91,11 @@ function sameUrl(left, right) {
   return canonicalString(left) === canonicalString(right);
 }
 
+function sameApprovedPostUrl(observed, expected) {
+  return LIVE_HOSTS.instagram.has(canonicalUrl(expected).hostname)
+    ? sameInstagramPostUrl(observed, expected) : sameUrl(observed, expected);
+}
+
 function approvedPermalink(rawTarget) {
   if (!rawTarget || typeof rawTarget !== "object") {
     fail("existing Chrome read authority target must be an object");
@@ -106,6 +113,7 @@ function approvedPermalink(rawTarget) {
       || !META_POST_PATH_RULES[platform]?.test(url.pathname)) {
     fail(`approved ${platform} target is not a trusted post permalink`);
   }
+  if (platform === "instagram") instagramUrlIdentity(rawTarget.post_permalink);
   return url.toString();
 }
 
@@ -136,7 +144,7 @@ export async function captureChromeAccessibleSnapshotPair(rawTarget, options = {
     await tab.goto(expectedUrl);
     if (settleMs > 0) await tab.playwright.waitForTimeout(settleMs);
     const beforeUrl = canonicalString(await tab.url());
-    if (!sameUrl(beforeUrl, expectedUrl)) {
+    if (!sameApprovedPostUrl(beforeUrl, expectedUrl)) {
       fail("bounded Chrome scan tab differs from the approved post permalink");
     }
     let viewportScrollCount = 0;
@@ -157,7 +165,7 @@ export async function captureChromeAccessibleSnapshotPair(rawTarget, options = {
     await tab.playwright.waitForTimeout(250);
     const secondSnapshot = await tab.playwright.domSnapshot();
     const afterUrl = canonicalString(await tab.url());
-    if (!sameUrl(afterUrl, expectedUrl) || !sameUrl(afterUrl, beforeUrl)) {
+    if (!sameApprovedPostUrl(afterUrl, expectedUrl) || !sameUrl(afterUrl, beforeUrl)) {
       fail("bounded Chrome scan document changed URL while capturing evidence");
     }
     if (typeof firstSnapshot !== "string" || !firstSnapshot.trim()
@@ -218,7 +226,7 @@ function exactFreshListingEntry(rawListing, expectedUrl) {
   const matches = rawListing.filter((entry) => {
     if (!entry || typeof entry !== "object" || typeof entry.url !== "string") return false;
     try {
-      return sameUrl(entry.url, expectedUrl);
+      return sameApprovedPostUrl(entry.url, expectedUrl);
     } catch {
       return false;
     }
@@ -303,7 +311,7 @@ async function inspectStableHost(tab, expectedUrl) {
     fail("existing Chrome read authority requires a browser tab URL surface");
   }
   const before = canonicalString(await tab.url());
-  if (!sameUrl(before, expectedUrl)) {
+  if (!sameApprovedPostUrl(before, expectedUrl)) {
     fail("current URL differs from the approved post permalink");
   }
   const firstTopology = await requireMainFrameTopology(tab);
@@ -311,7 +319,7 @@ async function inspectStableHost(tab, expectedUrl) {
   const secondTopology = await requireMainFrameTopology(tab);
   const after = canonicalString(await tab.url());
   if (!sameUrl(before, after) || !sameUrl(after, root.location_href)
-      || !sameUrl(after, expectedUrl)) {
+      || !sameApprovedPostUrl(after, expectedUrl)) {
     fail("trusted host URL changed during document verification");
   }
   if (JSON.stringify(firstTopology) !== JSON.stringify(secondTopology)) {

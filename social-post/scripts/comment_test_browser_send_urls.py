@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline regressions for exact ledger-bound Threads reply-page send evidence."""
+"""Offline regressions for exact ledger-bound Meta URL send/scan evidence."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from comment_browser_common import _json_digest
+from comment_browser_common import _json_digest, _require_post_url
+from comment_browser_scan_contract import _normalize_scanned_comment
 from comment_browser_send_contract import (
     _require_send_observed_url,
     classify_browser_reinspection,
@@ -25,15 +26,26 @@ from comment_test_cli import draft_cli_fixture, prepare_cli_fixture, run_cli
 from comment_test_support import POLICY
 
 
-class ThreadsSendObservedUrlTests(unittest.TestCase):
+class _SendObservedUrlFixture(unittest.TestCase):
+    PLATFORM = "threads"
+
     @classmethod
     def setUpClass(cls) -> None:
         # This adapter operates only on local fixture DOM, never Chrome.
         with tempfile.TemporaryDirectory(prefix="social-send-url-contract-") as raw:
             root = Path(raw)
             script, _unused = prepare_cli_fixture(root, live_browser_actuation_enabled=True)
-            adapter = LocalFixtureCommentAdapter("threads")
-            cls.comment = ingest_browser_scan(script, root, scan_envelope(adapter))
+            adapter = LocalFixtureCommentAdapter(cls.PLATFORM)
+            scan = scan_envelope(adapter)
+            if cls.PLATFORM == "instagram":
+                # The approved reel, redirect, and native comment can use
+                # different path aliases without changing their media identity.
+                scan["post_permalink"] = scan["post_permalink"].replace("/p/", "/reels/")
+                scan["observed_url"] = scan["post_permalink"].replace("/reels/", "/reel/")
+                for comment in scan["comments"]:
+                    comment["post_permalink"] = scan["post_permalink"]
+                    comment["observed_parent_post_permalink"] = scan["observed_url"]
+            cls.comment = ingest_browser_scan(script, root, scan)
             _reply_path, cls.intent_id = draft_cli_fixture(script, root, cls.comment)
             run_cli(
                 script, root, "approve", "--intent-id", cls.intent_id,
@@ -70,6 +82,7 @@ class ThreadsSendObservedUrlTests(unittest.TestCase):
             {self.comment["comment_key"]: state}, POLICY, self.intent_id, SESSION_ID,
         )
 
+class ThreadsSendObservedUrlTests(_SendObservedUrlFixture):
     def test_all_stages_accept_original_post_and_exact_stored_reply(self) -> None:
         for stage in self.stages:
             for url in (self.comment["post_permalink"], self.comment["comment_permalink"]):
@@ -159,7 +172,7 @@ class ThreadsSendObservedUrlTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             _require_send_observed_url(no_anchor, self.comment["comment_permalink"])
-        for platform in ("facebook", "instagram"):
+        for platform in ("facebook",):
             post = PLATFORM_URLS[platform]
             comment = {"platform": platform, "post_permalink": post, "comment_permalink": post + "/comment/id"}
             with self.subTest(platform=platform):
@@ -168,8 +181,80 @@ class ThreadsSendObservedUrlTests(unittest.TestCase):
                     _require_send_observed_url(comment, comment["comment_permalink"])
 
 
+class InstagramSendObservedUrlTests(_SendObservedUrlFixture):
+    PLATFORM = "instagram"
+
+    def test_all_stages_accept_same_shortcode_post_aliases_and_exact_native_comment(self) -> None:
+        post = self.comment["post_permalink"]
+        urls = [post.replace("/reels/", f"/{kind}/") for kind in ("p", "reel", "reels", "tv")]
+        urls.append(self.comment["comment_permalink"])
+        for stage in self.stages:
+            for url in urls:
+                with self.subTest(stage=stage[0], url=url):
+                    outcome = self.validate(stage, url)
+                    if stage[0] != "preflight":
+                        self.assertEqual(outcome["result"], "sent")
+
+    def test_all_stages_reject_different_media_comment_host_and_ambiguous_query(self) -> None:
+        anchor = self.comment["comment_permalink"]
+        invalid = (
+            anchor.replace("post-instagram", "other-shortcode"),
+            anchor + "-other", anchor + "/c/other", anchor.replace("/c/", "/comment/"),
+            anchor.replace("www.instagram.com", "instagram.com"),
+            anchor.replace("www.instagram.com", "evil.example"),
+            anchor.replace("https://", "http://"), anchor.replace("https://", "https://user@"),
+            anchor.replace("www.instagram.com", "www.instagram.com:444"),
+            anchor + "?comment_id=other", anchor + "?x=1&x=1",
+            self.comment["post_permalink"] + "?reply_id=other",
+            self.comment["post_permalink"] + "?x=1",
+        )
+        for stage in self.stages:
+            for url in invalid:
+                with self.subTest(stage=stage[0], url=url), self.assertRaises(ValueError):
+                    self.validate(stage, url)
+
+    def test_native_comment_requires_stored_id_parent_and_signed_action(self) -> None:
+        anchor = self.comment["comment_permalink"]
+        for stage in self.stages:
+            for changes in ({"platform_comment_id": "different-id"},
+                            {"observed_parent_post_permalink": None},
+                            {"observed_parent_post_permalink": self.comment["post_permalink"] + "-other"}):
+                with self.subTest(stage=stage[0], changes=changes), self.assertRaises(ValueError):
+                    self.validate(stage, anchor, comment=dict(self.comment, **changes))
+            with self.subTest(stage=stage[0]), self.assertRaises(ValueError):
+                self.validate(stage, anchor, changes={"action_id": "unapproved-action"})
+        forged = dict(self.action, post_permalink=self.comment["post_permalink"].replace("/reels/", "/p/"))
+        with self.assertRaisesRegex(ValueError, "action_digest differs from approved action"):
+            self.validate(self.stages[0], anchor, changes={"action_digest": _json_digest(forged)})
+
+    def test_scan_rejects_wrong_shortcode_or_disagreeing_comment_id(self) -> None:
+        scope = {key: self.comment[key] for key in ("platform", "account_key", "post_key", "post_permalink")}
+        for changes in (
+            {"comment_permalink": self.comment["comment_permalink"].replace("post-instagram", "other")},
+            {"platform_comment_id": "other-id"},
+            {"comment_permalink": self.comment["comment_permalink"] + "/c/other"},
+            {"observed_parent_post_permalink": self.comment["post_permalink"] + "-other"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                _normalize_scanned_comment(dict(self.comment, **changes), scope, self.comment["observed_at"])
+
+    def test_queries_must_be_exact_and_cannot_duplicate_identity(self) -> None:
+        base = self.comment["post_permalink"]
+        alias = base.replace("/reels/", "/p/")
+        self.assertEqual(_require_post_url("instagram", alias + "?igsh=fixture", base + "?igsh=fixture", "URL"), alias + "?igsh=fixture")
+        for current, approved in (
+            (alias, base + "?igsh=fixture"), (alias + "?igsh=other", base + "?igsh=fixture"),
+            (alias + "?x=1&x=1", base + "?x=1&x=1"),
+            (alias + "?x=1&X=1", base + "?x=1&X=1"),
+            (alias + "?comment_id=123", base + "?comment_id=123"),
+        ):
+            with self.subTest(current=current), self.assertRaises(ValueError):
+                _require_post_url("instagram", current, approved, "URL")
+
+
 def run_browser_send_url_tests() -> None:
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(ThreadsSendObservedUrlTests)
+    suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(test_case)
+                               for test_case in (ThreadsSendObservedUrlTests, InstagramSendObservedUrlTests))
     result = unittest.TestResult()
     suite.run(result)
     if not result.wasSuccessful():

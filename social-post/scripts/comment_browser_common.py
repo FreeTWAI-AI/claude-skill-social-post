@@ -92,6 +92,32 @@ def _require_platform_url(platform: str, value: str, label: str) -> str:
     return canonical
 
 
+def _instagram_url_identity(value: str, *, allow_comment: bool = False) -> dict[str, str | None]:
+    canonical = _require_platform_url("instagram", value, "Instagram URL")
+    parsed = urlsplit(canonical)
+    post = re.fullmatch(
+        r"/(?:([A-Za-z0-9._]+)/)?(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)", parsed.path,
+    )
+    comment = re.fullmatch(
+        r"/p/([A-Za-z0-9_-]+)/c/([A-Za-z0-9_-]+)", parsed.path,
+    ) if allow_comment else None
+    if (not post or post[1] in {".", "..", "p", "reel", "reels", "tv", "c"}) and not comment:
+        raise ValueError("Instagram URL is not a supported post or native comment permalink")
+    keys: set[str] = set()
+    for key, _value in parse_qsl(parsed.query, keep_blank_values=True):
+        normalized = key.lower()
+        if normalized in keys or re.fullmatch(
+            r"(?:id|comment_?id|reply_?id|media_?id|shortcode)", normalized,
+        ):
+            raise ValueError("Instagram URL query contains duplicate or ambiguous identifiers")
+        keys.add(normalized)
+    return {
+        "url": canonical, "hostname": parsed.hostname, "query": parsed.query,
+        "shortcode": comment[1] if comment else post[2],
+        "comment_id": comment[2] if comment else None,
+    }
+
+
 def _require_post_url(
     platform: str, observed: str, expected: str, label: str,
 ) -> str:
@@ -101,6 +127,14 @@ def _require_post_url(
     target_parts = urlsplit(target)
     if current_parts.hostname != target_parts.hostname:
         raise ValueError(f"{label} host differs from approved post_permalink")
+    if platform == "instagram":
+        current_identity = _instagram_url_identity(observed)
+        target_identity = _instagram_url_identity(expected)
+        if current_identity["shortcode"] != target_identity["shortcode"]:
+            raise ValueError(f"{label} shortcode differs from approved post_permalink")
+        if current_identity["query"] != target_identity["query"]:
+            raise ValueError(f"{label} query differs from approved post_permalink")
+        return current
     if current_parts.path != target_parts.path:
         raise ValueError(f"{label} path differs from approved post_permalink")
     expected_query = Counter(parse_qsl(target_parts.query, keep_blank_values=True))
@@ -112,6 +146,7 @@ def _require_post_url(
 
 def _require_comment_permalink_for_post(
     platform: str, observed: str, expected_post: str,
+    platform_comment_id: str | None = None,
 ) -> str:
     """Accept a stable platform comment anchor bound to the approved parent.
 
@@ -119,7 +154,9 @@ def _require_comment_permalink_for_post(
     its comment path cannot be nested under the root post path.  Parentage is
     independently and strictly proven by ``observed_parent_post_permalink`` in
     the scan contract; here we validate the Threads reply identity shape and
-    trusted host instead of applying the FB/IG nesting rule.
+    trusted host instead of applying the FB nesting rule. Instagram native
+    comment anchors may use /p/ while the parent uses /reel/ or /reels/; the
+    exact shortcode, host, query and (when present) ledger comment ID remain bound.
     """
     comment = _require_platform_url(platform, observed, "comment_permalink")
     post = _require_platform_url(platform, expected_post, "post_permalink")
@@ -127,6 +164,18 @@ def _require_comment_permalink_for_post(
     post_parts = urlsplit(post)
     if comment_parts.hostname != post_parts.hostname:
         raise ValueError("comment_permalink host differs from approved post")
+    if platform == "instagram":
+        anchor = _instagram_url_identity(observed, allow_comment=True)
+        parent = _instagram_url_identity(expected_post)
+        if not anchor["comment_id"]:
+            raise ValueError("Instagram comment_permalink requires a native comment ID")
+        if anchor["shortcode"] != parent["shortcode"]:
+            raise ValueError("Instagram comment_permalink shortcode differs from approved post")
+        if anchor["query"] != parent["query"]:
+            raise ValueError("Instagram comment_permalink does not retain approved post query")
+        if platform_comment_id is not None and anchor["comment_id"] != platform_comment_id:
+            raise ValueError("Instagram comment_permalink ID differs from platform_comment_id")
+        return comment
     if platform == "threads":
         if not re.fullmatch(r"/@[^/]+/post/[^/]+", comment_parts.path):
             raise ValueError("Threads comment_permalink is not a stable reply post")

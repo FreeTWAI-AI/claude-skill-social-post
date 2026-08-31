@@ -396,6 +396,7 @@ def _normalize_scanned_comment(
     if comment_permalink:
         value["comment_permalink"] = _require_comment_permalink_for_post(
             scope["platform"], str(comment_permalink), scope["post_permalink"],
+            value.get("platform_comment_id"),
         )
     parent = _required_string(value, "observed_parent_post_permalink")
     parent = _require_post_url(

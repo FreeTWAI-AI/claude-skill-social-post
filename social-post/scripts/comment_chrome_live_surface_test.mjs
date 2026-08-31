@@ -22,6 +22,22 @@ const instagram = action("instagram", "https://www.instagram.com/p/abc",
 assert.equal(liveReplyUrl(threads), threads.comment_anchor.comment_permalink);
 assert.equal(liveReplyUrl(facebook), facebook.comment_anchor.comment_permalink);
 assert.equal(liveReplyUrl(instagram), instagram.comment_anchor.comment_permalink);
+for (const kind of ["p", "reel", "reels", "tv"]) {
+  const aliased = { ...instagram, post_permalink: `https://www.instagram.com/${kind}/abc/` };
+  assert.equal(liveReplyUrl(aliased), instagram.comment_anchor.comment_permalink);
+}
+for (const url of [
+  "https://www.instagram.com/p/wrong/c/123", "https://www.instagram.com/p/abc/c/other",
+  "https://www.instagram.com/p/abc/c/123/c/other", "https://www.instagram.com/p/abc/c/123%2Fother",
+  "https://www.instagram.com/p/abc/c/123?comment_id=other", "https://www.instagram.com/p/abc/c/123?x=1&x=1",
+  "https://www.instagram.com/p/abc/c/123?x=1", "https://instagram.com/p/abc/c/123",
+  "https://user@www.instagram.com/p/abc/c/123", "https://www.instagram.com:444/p/abc/c/123",
+  "https://www.instagram.com/p/abc/c/other/../123", "https://www.instagram.com/p/abc",
+]) {
+  assert.throws(() => liveReplyUrl({ ...instagram, comment_anchor: {
+    ...instagram.comment_anchor, comment_permalink: url,
+  } }));
+}
 assert.equal(liveReplyUrl({ ...facebook, comment_anchor: { platform_comment_id: "123" } }), facebook.comment_anchor.comment_permalink);
 for (const url of [
   "https://evil.example/@reader/post/c1", "http://www.threads.com/@reader/post/c1",

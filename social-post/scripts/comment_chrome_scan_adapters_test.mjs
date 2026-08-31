@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 
 import * as productionAdapters from "./comment_chrome_scan_adapters.mjs";
 import {
+  META_SNAPSHOT_ADAPTER_VERSION,
+  parseFacebookSnapshot,
+} from "./comment_meta_snapshot_parser.mjs";
+import {
   createTrustedFixtureScanPlan,
   createTrustedFixtureScanPost,
   isTrustedFixtureExpansionAttestation,
@@ -282,6 +286,196 @@ function fixtureOptions(postUrl) {
   return { testOnly: true, receiptObservedUrl: postUrl };
 }
 
+function facebookSnapshotTarget(path = "story.php", query = "story_fbid=POST_A&id=ACCOUNT_A") {
+  return {
+    platform: "facebook", account_key: "ACCOUNT_A", post_key: "POST_A",
+    post_permalink: `https://www.facebook.com/${path}${query ? `?${query}` : ""}`,
+  };
+}
+
+function facebookSnapshotArticle(permalink, options = {}) {
+  const indent = " ".repeat(options.indent ?? 2);
+  const author = options.author ?? "VIEWER_A";
+  return [
+    `${indent}- article "${author}的留言":`,
+    `${indent}  - link "${author}":`,
+    `${indent}    - /url: https://www.facebook.com/${author}`,
+    `${indent}  - link "1分鐘":`,
+    `${indent}    - /url: ${permalink}`,
+    `${indent}  - text: ${options.body ?? "Generic comment body"}`,
+    `${indent}  - button "讚"`,
+    `${indent}  - button "回覆"`,
+    ...(options.nested ? [options.nested] : []),
+  ].join("\n");
+}
+
+function facebookSnapshot(target, count, articles = [], explicitZero = false) {
+  return [
+    "- main:",
+    '  - link "Generic target post":',
+    `    - /url: ${target.post_permalink}`,
+    ...(count === null ? [] : ['  - button "留言":', `    - generic: "${count}"`]),
+    ...articles,
+    ...(explicitZero ? ["  - text: 尚無留言"] : []),
+  ].join("\n");
+}
+
+function assertFacebookSnapshotRejects(target, links, count = links.length, label = "unbound article") {
+  assert.throws(
+    () => parseFacebookSnapshot(
+      facebookSnapshot(target, count, links.map((link) => facebookSnapshotArticle(link))), target,
+    ),
+    /Facebook/u,
+    label,
+  );
+}
+
+function runFacebookSnapshotParserRegressions() {
+  for (const path of ["story.php", "permalink.php"]) {
+    const target = facebookSnapshotTarget(path);
+    const base = `https://www.facebook.com/${path}`;
+    const originalRoot = target.post_permalink;
+    for (const query of [
+      "comment_id=COMMENT_A&story_fbid=POST_A&id=ACCOUNT_A",
+      "comment_id=COMMENT_A&id=ACCOUNT_A&story_fbid=POST_A",
+      "story_fbid=POST_A&comment_id=COMMENT_A&id=ACCOUNT_A",
+      "story_fbid=POST_A&id=ACCOUNT_A&comment_id=COMMENT_A",
+      "id=ACCOUNT_A&comment_id=COMMENT_A&story_fbid=POST_A",
+      "id=ACCOUNT_A&story_fbid=POST_A&comment_id=COMMENT_A",
+    ]) {
+      const parsed = parseFacebookSnapshot(
+        facebookSnapshot(target, 1, [facebookSnapshotArticle(`${base}?${query}`)]), target,
+      );
+      assert.equal(parsed.comments.length, 1, `${path}: query order must not lose a comment`);
+      assert.equal(parsed.comments[0].platform_comment_id, "COMMENT_A");
+      assert.equal(parsed.comments[0].observed_parent_post_permalink, originalRoot);
+      assert.equal(parsed.comments[0].comment_permalink, `${originalRoot}&comment_id=COMMENT_A`);
+      assert.equal(parsed.comments[0].body, "Generic comment body");
+      assert.equal(parsed.comments_expanded, true);
+      assert.equal(parsed.replies_expanded, true);
+    }
+    const reorderedTarget = facebookSnapshotTarget(path, "id=ACCOUNT_A&story_fbid=POST_A");
+    const reordered = parseFacebookSnapshot(facebookSnapshot(reorderedTarget, 1, [
+      facebookSnapshotArticle(`${originalRoot}&comment_id=COMMENT_A`),
+    ]), reorderedTarget);
+    assert.equal(reordered.comments[0].observed_parent_post_permalink, reorderedTarget.post_permalink);
+    assert.equal(reordered.comments[0].comment_permalink, `${reorderedTarget.post_permalink}&comment_id=COMMENT_A`);
+
+    for (const query of [
+      "story_fbid=POST_B&id=ACCOUNT_A&comment_id=COMMENT_A",
+      "story_fbid=POST_A&id=ACCOUNT_B&comment_id=COMMENT_A",
+      "id=ACCOUNT_A&comment_id=COMMENT_A",
+      "story_fbid=POST_A&comment_id=COMMENT_A",
+      "story_fbid=POST_A&id=ACCOUNT_A",
+    ]) {
+      assertFacebookSnapshotRejects(target, [`${base}?${query}`], 1, `${path}: ${query}`);
+    }
+
+    const validQuery = "story_fbid=POST_A&id=ACCOUNT_A&comment_id=COMMENT_A";
+    for (const [key, originalValue] of [
+      ["story_fbid", "POST_A"], ["id", "ACCOUNT_A"], ["comment_id", "COMMENT_A"],
+      ["reply_comment_id", "REPLY_A"],
+    ]) {
+      const query = key === "reply_comment_id" ? `${validQuery}&${key}=${originalValue}` : validQuery;
+      for (const duplicate of [originalValue, "DIFFERENT_A"]) {
+        assertFacebookSnapshotRejects(
+          target, [`${base}?${query}&${key}=${duplicate}`], 1,
+          `${path}: duplicate ${key} must not establish identity`,
+        );
+      }
+      for (const badValue of ["", "BAD%2FVALUE", "BAD%20VALUE", "BAD%ZZVALUE", "BAD+VALUE"]) {
+        const malformed = query.replace(`${key}=${originalValue}`, `${key}=${badValue}`);
+        assertFacebookSnapshotRejects(
+          target, [`${base}?${malformed}`], 1, `${path}: malformed ${key}`,
+        );
+      }
+    }
+
+    // A visible article count is not coverage unless every counted article has
+    // a permalink bound to this root. A partially mapped feed must fail closed.
+    const mapped = `${originalRoot}&comment_id=COMMENT_A`;
+    const foreign = `${base}?story_fbid=POST_B&id=ACCOUNT_A&comment_id=COMMENT_B`;
+    assertFacebookSnapshotRejects(target, [`https://www.facebook.com/UNMAPPED_A`], 1);
+    assertFacebookSnapshotRejects(target, [mapped, foreign], 2, `${path}: partial mapping`);
+    assertFacebookSnapshotRejects(target, [mapped], 2, `${path}: missing counted article`);
+    assert.throws(
+      () => parseFacebookSnapshot(facebookSnapshot(target, 1, [
+        facebookSnapshotArticle(foreign).replace(
+          "    - text: Generic comment body",
+          `    - link "Quoted comment":\n      - /url: ${mapped}\n    - text: Generic comment body`,
+        ),
+      ]), target),
+      /Facebook/u, `${path}: a later body link cannot substitute for a foreign primary permalink`,
+    );
+
+    const nested = facebookSnapshotArticle(
+      `${originalRoot}&comment_id=COMMENT_A&reply_comment_id=REPLY_A`,
+      { author: "ACCOUNT_A", body: "Generic own reply", indent: 4 },
+    );
+    const parent = facebookSnapshotArticle(mapped, { nested });
+    const parsedNested = parseFacebookSnapshot(facebookSnapshot(target, 2, [parent]), target);
+    assert.equal(parsedNested.comments.length, 1, `${path}: nested reply is not another queue root`);
+    assert.equal(parsedNested.comments[0].platform_comment_id, "COMMENT_A");
+    assert.equal(parsedNested.comments[0].body, "Generic comment body");
+    assert.equal(parsedNested.comments[0].has_own_reply, true);
+    assert.equal(parsedNested.comments_expanded, true);
+    assert.equal(parsedNested.replies_expanded, true);
+    const foreignNested = facebookSnapshotArticle(foreign, { indent: 4, author: "ACCOUNT_A" });
+    assert.throws(
+      () => parseFacebookSnapshot(
+        facebookSnapshot(target, 2, [facebookSnapshotArticle(mapped, { nested: foreignNested })]), target,
+      ), /Facebook/u, `${path}: a foreign nested article cannot satisfy total coverage`,
+    );
+    assert.throws(
+      () => parseFacebookSnapshot(
+        facebookSnapshot(target, 2, [facebookSnapshotArticle(
+          "https://www.facebook.com/UNMAPPED_A", { nested },
+        )]), target,
+      ), /Facebook/u, `${path}: an unmapped parent cannot borrow its nested reply permalink`,
+    );
+
+    const zero = parseFacebookSnapshot(facebookSnapshot(target, null, [], true), target);
+    assert.deepEqual(zero.comments, []);
+    assert.equal(zero.comments_expanded, true);
+    assert.equal(zero.replies_expanded, true);
+    assert.deepEqual(parseFacebookSnapshot(facebookSnapshot(target, 0), target).comments, []);
+    assert.throws(() => parseFacebookSnapshot(facebookSnapshot(target, null), target), /Facebook/u);
+    for (const rootQuery of [
+      "id=ACCOUNT_A", "story_fbid=POST_A", "story_fbid=&id=ACCOUNT_A",
+      "story_fbid=POST_A&id=", "story_fbid=BAD%2FVALUE&id=ACCOUNT_A",
+      "story_fbid=POST_A&id=BAD%20VALUE", "story_fbid=POST_A&id=ACCOUNT_A&id=ACCOUNT_A",
+    ]) {
+      const malformedTarget = facebookSnapshotTarget(path, rootQuery);
+      assert.throws(
+        () => parseFacebookSnapshot(facebookSnapshot(malformedTarget, null, [], true), malformedTarget),
+        /Facebook/u, `${path}: malformed root identity must not pass via explicit zero`,
+      );
+    }
+  }
+
+  const genericTarget = {
+    ...facebookSnapshotTarget("story.php", "story_fbid=Post_A-1&id=Account_A-1"),
+    account_key: "Account_A-1", post_key: "Post_A-1",
+  };
+  const generic = parseFacebookSnapshot(facebookSnapshot(genericTarget, 1, [
+    facebookSnapshotArticle(`${genericTarget.post_permalink}&comment_id=Comment_A-1`),
+  ]), genericTarget);
+  assert.equal(generic.comments[0].platform_comment_id, "Comment_A-1");
+
+  const pfbidTarget = {
+    ...facebookSnapshotTarget("GENERIC_PAGE/posts/pfbidGENERIC_A/", ""),
+    post_key: "pfbidGENERIC_A",
+  };
+  const canonicalPfbidRoot = pfbidTarget.post_permalink.replace(/\/$/u, "");
+  const pfbid = parseFacebookSnapshot(facebookSnapshot(pfbidTarget, 1, [
+    facebookSnapshotArticle(`${canonicalPfbidRoot}?comment_id=COMMENT_A`),
+  ]), pfbidTarget);
+  assert.equal(pfbid.comments[0].comment_permalink, `${canonicalPfbidRoot}?comment_id=COMMENT_A`);
+  assert.equal(pfbid.comments[0].observed_parent_post_permalink, canonicalPfbidRoot);
+}
+
+runFacebookSnapshotParserRegressions();
+
 // Production exports contain no fixture factory and no fixture revision.
 assert.equal("createTrustedFixtureScanPlan" in productionAdapters, false);
 const productionVersions = productionAdapters.trustedPlatformAdapterVersions();
@@ -292,7 +486,7 @@ assert.equal(
 );
 assert.deepEqual(productionVersions.instagram.live, {
   id: "meta-accessibility-snapshot",
-  version: "2026-08-30.1",
+  version: META_SNAPSHOT_ADAPTER_VERSION,
 });
 const productionHostResolver = productionVersions.instagram.trusted_host_resolver;
 assert.equal(productionHostResolver.schema_version, 2);

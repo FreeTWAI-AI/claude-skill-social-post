@@ -4,9 +4,11 @@
  * comment permalinks are the identity boundary.
  */
 
-import { fail, immutableJsonSnapshot, requiredString } from "./comment_chrome_common.mjs";
+import {
+  LIVE_HOSTS, canonicalUrl, fail, immutableJsonSnapshot, requiredString,
+} from "./comment_chrome_common.mjs";
 
-export const META_SNAPSHOT_ADAPTER_VERSION = "2026-08-30.1";
+export const META_SNAPSHOT_ADAPTER_VERSION = "2026-08-31.2";
 
 function textValue(raw) {
   let value = String(raw ?? "").trim();
@@ -55,8 +57,46 @@ function assertSnapshot(raw) {
   return raw.replace(/\r\n?/gu, "\n");
 }
 
-function parentMatches(observed, expected) {
-  return cleanParentUrl(observed) === cleanParentUrl(expected);
+function facebookIdentityParameter(url, key, { required = false } = {}) {
+  const values = url.searchParams.getAll(key);
+  if (values.length > 1 || (required && values.length !== 1)
+      || (values.length === 1 && !/^[A-Za-z0-9_-]+$/u.test(values[0]))) {
+    fail(`Facebook ${key} must be one non-empty stable identity value`);
+  }
+  return values[0] ?? null;
+}
+
+function facebookUrlIdentity(raw, { requireComment = false } = {}) {
+  const url = canonicalUrl(raw);
+  if (url.protocol !== "https:" || !LIVE_HOSTS.facebook.has(url.hostname)) {
+    fail("Facebook comment identity URL is not a trusted HTTPS host");
+  }
+  const commentId = facebookIdentityParameter(url, "comment_id", { required: requireComment });
+  facebookIdentityParameter(url, "reply_comment_id");
+  const queryIdentified = /^\/(?:story|permalink)\.php$/u.test(url.pathname);
+  const storyId = facebookIdentityParameter(url, "story_fbid", { required: queryIdentified });
+  const accountId = facebookIdentityParameter(url, "id", { required: queryIdentified });
+  const identity = new URL(url);
+  identity.search = "";
+  if (queryIdentified) {
+    identity.searchParams.set("story_fbid", storyId);
+    identity.searchParams.set("id", accountId);
+  }
+  return { url, parentIdentity: identity.toString(), commentId };
+}
+
+function facebookCommentLink(block, expectedIdentity) {
+  const nestedStart = block.search(/\n\s*- article /u);
+  const ownBlock = nestedStart < 0 ? block : block.slice(0, nestedStart);
+  for (const match of ownBlock.matchAll(/- \/url: (https:\/\/[^\s]+)/gu)) {
+    const url = new URL(match[1]);
+    if (!url.searchParams.has("comment_id")) continue;
+    const identity = facebookUrlIdentity(match[1], { requireComment: true });
+    // The first stable comment link owns this article; a later link in its body
+    // cannot substitute for a primary link bound to another post.
+    return identity.parentIdentity === expectedIdentity ? { match, ...identity } : null;
+  }
+  return null;
 }
 
 function facebookBody(block, timeUrlIndex) {
@@ -76,7 +116,7 @@ function facebookBody(block, timeUrlIndex) {
   return parts.join("").trim();
 }
 
-function facebookArticleBlocks(snapshot) {
+function facebookArticleBlocks(snapshot, { includeNested = false } = {}) {
   const lines = snapshot.split("\n");
   const blocks = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -90,31 +130,33 @@ function facebookArticleBlocks(snapshot) {
       end += 1;
     }
     blocks.push({ authorDisplay: match[2], indent, block: lines.slice(index, end).join("\n") });
-    index = end - 1;
+    if (!includeNested) index = end - 1;
   }
   return blocks;
 }
 
 export function parseFacebookSnapshot(rawSnapshot, target) {
   const snapshot = assertSnapshot(rawSnapshot);
-  const expectedParent = cleanParentUrl(target.post_permalink);
+  const approved = facebookUrlIdentity(target.post_permalink);
+  const parent = new URL(approved.url);
+  parent.searchParams.delete("comment_id");
+  parent.searchParams.delete("reply_comment_id");
+  const expectedParent = parent.toString();
   const comments = [];
   for (const item of facebookArticleBlocks(snapshot)) {
-    const permalinkMatch = [...item.block.matchAll(
-      /- \/url: (https:\/\/www\.facebook\.com\/[^\s]+\?comment_id=([^&\s]+)[^\s]*)/gu,
-    )].find((match) => parentMatches(match[1], expectedParent));
-    if (!permalinkMatch) continue;
-    const observedParent = cleanParentUrl(permalinkMatch[1]);
-    if (!parentMatches(observedParent, expectedParent)) continue;
+    const permalink = facebookCommentLink(item.block, approved.parentIdentity);
+    if (!permalink) continue;
+    const commentUrl = new URL(parent);
+    commentUrl.searchParams.set("comment_id", permalink.commentId);
     const authorLinkMatch = item.block.match(/- link "[^"]+":\n\s+- \/url: (https:\/\/www\.facebook\.com\/([^?\/\s]+)[^\s]*)/u);
-    const body = facebookBody(item.block, item.block.indexOf(permalinkMatch[0]));
+    const body = facebookBody(item.block, item.block.indexOf(permalink.match[0]));
     if (!body) fail("Facebook comment body is not complete in the accessible snapshot");
     const isOwn = ownByProfileUrl("facebook", target.account_key, authorLinkMatch?.[1]);
     const nestedOwnReply = /\n\s+- article /u.test(item.block)
       && item.block.includes(`https://www.facebook.com/${target.account_key}`);
     const candidate = {
-      platform_comment_id: decodeURIComponent(permalinkMatch[2]),
-      comment_permalink: `${expectedParent}?comment_id=${encodeURIComponent(decodeURIComponent(permalinkMatch[2]))}`,
+      platform_comment_id: permalink.commentId,
+      comment_permalink: commentUrl.toString(),
       observed_parent_post_permalink: expectedParent,
       author_key: authorLinkMatch?.[2] || item.authorDisplay,
       author_display: item.authorDisplay,
@@ -122,7 +164,7 @@ export function parseFacebookSnapshot(rawSnapshot, target) {
       body_complete: !/查看更多/u.test(item.block),
       is_own: isOwn,
       has_own_reply: nestedOwnReply
-        || (isOwn && /[?&]reply_comment_id=/u.test(permalinkMatch[1])),
+        || (isOwn && permalink.url.searchParams.has("reply_comment_id")),
       language: languageOf(body),
     };
     const duplicateIndex = comments.findIndex((comment) => (
@@ -165,6 +207,8 @@ export function parseFacebookSnapshot(rawSnapshot, target) {
   const visibleArticleCount = [...relevantSnapshot.matchAll(
     /^\s*- article "[^"]*留言[^"]*":/gmu,
   )].length;
+  const boundArticleCount = facebookArticleBlocks(relevantSnapshot, { includeNested: true })
+    .filter((item) => facebookCommentLink(item.block, approved.parentIdentity) !== null).length;
   if (!expectedCountMatches.length && comments.length === 0 && !explicitZero) {
     fail("Facebook snapshot has no terminal comment count or explicit zero state");
   }
@@ -175,6 +219,9 @@ export function parseFacebookSnapshot(rawSnapshot, target) {
   // visible comment/reply articles.
   if (visibleArticleCount < expectedCount) {
     fail(`Facebook snapshot exposes ${visibleArticleCount} of ${expectedCount} comment articles`);
+  }
+  if (boundArticleCount < expectedCount || (expectedCount > 0 && comments.length === 0)) {
+    fail(`Facebook snapshot binds ${boundArticleCount} of ${expectedCount} comment articles to the approved post`);
   }
   // Facebook commonly keeps an unrelated background status node named
   // "載入中" even after every count-bound comment permalink is present.  The

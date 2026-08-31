@@ -41,7 +41,9 @@ Python 不能直接 import Codex 的 Chrome 工具，因此 bridge 不是背景 
 - `executeApprovedReply({ intentId, sessionId })`：新增候選 fused 路徑。只讀取本機已核准 action，私有 tab 驗證原留言、編輯器、完整本文與穩定節點，durable claim 後最多點擊一次，再由私有 bridge 提交結果。預設開關仍關閉。
 - `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 claim、不 submit。新的唯讀 `browser-recovery-action` 會核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。
 - Threads 已完成指定樣本的帳號、原貼文、原留言、零回覆狀態與編輯器只讀驗證；尚無本版真實送出／結果回讀 canary。不得宣稱 sent 或完整自動回覆已驗證。
-- FB 已辨識指定樣本的既有自己回覆及其 form；完整展開與 composer actor 尚未驗證，因此 `complete=false`，不允許送出或推導不存在。IG 沒有獲准且可驗證的非零留言樣本，live reply surface 仍不可用。
+- FB 已辨識指定樣本的既有自己回覆及其 form；完整展開與 composer actor 尚未驗證，因此 `complete=false`。story／permalink query 解析保留並核對 `story_fbid`＋`id`，不能因未解析出留言就宣稱完整零結果。
+- IG 已在使用者指定樣本完成 native comment page 的 account／parent／whole-body／child-permalink／composer 只讀正反驗證。`p/reel/reels/tv` 僅在同 host、shortcode 與 query 時視為同貼文；原生留言 `/p/S/c/P/` 與子回覆 `/p/S/c/P/r/R/` 分別綁定層級。未展開的回覆不能當零；shared textarea 的 `@author` 自動帶入不能單獨證明選中了正確父留言。因此 IG 仍 `complete=false`，不能送出或推導 absence。
+- IG Reel 畫面可能同時顯示 Facebook 留言數；分平台只認該平台原生留言 anchor，不以合併總數或已載入 viewport 當完整掃描。不同語言依原文草擬；索取集數、語言版或連結都需人工確認，不自動承諾未存在的內容。
 - 不用未指定貼文、動態牆、私訊或整頁私人截圖補齊缺證據。缺少指定樣本或公開測試授權時停止 live 驗證，報告具體缺口；不要重跑同一批 tests 當成進度。
 
 以下分離式 `prepareReply`／`submitOnce` 舊介面仍是 fixture／未來契約；不得把它與上方候選 fused 入口混為一談。候選入口必須經授權 canary 與完整回覆展開驗證才能升級公開 capability projection。

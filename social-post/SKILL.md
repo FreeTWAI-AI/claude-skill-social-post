@@ -7,7 +7,7 @@ description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語
 
 把內容生成、實際發布與成效學習分開。依意圖只讀必要資料，不把整個案例庫一次塞進 context。
 
-P5 執行前先核對 `references/chrome-comment-adapter.md` 的當前狀態：來源綁定掃描已接線，候選單次送出／唯讀恢復已實作，但三平台真實送出 canary 未完成，送出開關仍關閉。FB／IG 不可用的部分必須明示，不得以 fixture 或只讀編輯器檢查宣稱完整自動回覆已完成。
+P5 執行前先核對 `references/chrome-comment-adapter.md` 的當前狀態：來源綁定掃描已接線，候選單次送出／唯讀恢復已實作，FB／IG 指定留言辨識已有只讀樣本，但完整回覆串與三平台真實送出 canary 未完成，送出開關仍關閉。不可用的部分必須明示，不得以 fixture 或只讀編輯器檢查宣稱完整自動回覆已完成。
 
 ## Session 啟動
 
