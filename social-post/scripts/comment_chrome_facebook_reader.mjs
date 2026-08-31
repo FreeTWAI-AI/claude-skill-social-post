@@ -2,6 +2,7 @@
 import { digestObject, fail, immutableJsonSnapshot, requiredString, unique } from "./comment_chrome_common.mjs";
 import { trustedUrl } from "./comment_chrome_live_common.mjs";
 import { verifyFacebookAccount } from "./comment_chrome_facebook_surface.mjs";
+import { readFacebookOwnReplyDetails } from "./comment_chrome_facebook_child_reader.mjs";
 
 export function facebookNativeTarget(rawTarget) {
   const target = immutableJsonSnapshot(rawTarget, "Facebook native target identity");
@@ -130,8 +131,8 @@ export async function readFacebookTargetComment(tab, rawTarget) {
   }
   // Rebuild the reviewed cross-realm schema. This target-only read does not
   // certify child coverage or absence; sending still needs independent proof.
-  const hasOwnReply = await article.evaluate(readFacebookOwnReplyPresence, { ...native, origin: observedUrl });
-  if (typeof hasOwnReply !== "boolean") fail("Facebook own-reply presence evidence is invalid");
+  const ownReplyDetails = await readFacebookOwnReplyDetails(tab, article, native, raw.authorDisplay);
+  const hasOwnReply = ownReplyDetails.replies.length > 0;
   const comment = { platform_comment_id: native.commentId, comment_permalink: native.commentUrl,
     observed_parent_post_permalink: native.postUrl, author_key: raw.author,
     author_display: raw.authorDisplay, body: raw.body, body_complete: true,

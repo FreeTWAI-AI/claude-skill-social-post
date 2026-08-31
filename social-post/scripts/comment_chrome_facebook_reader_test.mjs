@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
 import {
-  facebookNativeTarget, readFacebookNativeRow, readFacebookTargetComment,
+  facebookNativeTarget, readFacebookNativeRow, readFacebookOwnReplyPresence, readFacebookTargetComment,
 } from "./comment_chrome_facebook_reader.mjs";
 import { bindLiveReplyBrowser } from "./comment_chrome_facebook_surface.mjs";
 
@@ -232,8 +232,8 @@ async function testSourceReaderAndUrlDrift() {
   assert.equal(result.comment.body_complete, true);
   assert.equal(result.documentBinding.kind, "source_owned_ui_continuity");
   assert.equal(result.documentBinding.observed_url, native.commentUrl);
-  assert.equal(good.fixture.evaluations, 2, "source reader executes both actual DOM callbacks");
-  assert.deepEqual(good.fixture.callbacks, ["readFacebookNativeRow", "readFacebookOwnReplyPresence"]);
+  assert.equal(good.fixture.evaluations, 2, "source reader executes the parent parser and real child-ID collector");
+  assert.deepEqual(good.fixture.callbacks, ["readFacebookNativeRow", "collectFacebookNativeChildIds"]);
   assert.equal(good.fixture.waits, 1);
   assert.equal(good.fixture.probes, 2);
   assert.equal(good.fixture.closed, 2);
@@ -268,18 +268,21 @@ async function testSourcePositiveOwnChildAndBodyMention() {
     const child = row({ authorHref: own ? "/example.owner" : "/another.reader",
       author: own ? "Example Owner" : "Another Reader", text: "A prior native child reply",
       commentHref: `${native.postPath}?comment_id=123&reply_comment_id=456` });
+    child.article.attrs["aria-label"] = `${own ? "Example Owner" : "Another Reader"}回覆Example Reader的留言1m前`;
     if (!own) child.body.append(el("a", { href: "/example.owner" }, [" mentioning the account"]));
     current.fixture.root.append(child.article);
     const result = await readFacebookTargetComment(current.tab, target);
     assert.equal(result.comment.has_own_reply, own,
       "native child author proves positive presence; an account mention in another author's body does not");
     assert.equal(result.comment.body, "Useful update");
-    assert.equal(current.fixture.evaluations, 2);
-    assert.deepEqual(current.fixture.callbacks, ["readFacebookNativeRow", "readFacebookOwnReplyPresence"]);
+    assert.equal(current.fixture.evaluations, own ? 3 : 2);
+    assert.deepEqual(current.fixture.callbacks, ["readFacebookNativeRow", "collectFacebookNativeChildIds",
+      ...(own ? ["readFacebookNativeChildRow"] : [])]);
     assert.equal(current.fixture.waits, 1);
   }
 }
 
+assert.equal(typeof readFacebookOwnReplyPresence, "function", "legacy positive-presence export remains compatible but is not the canonical read callback");
 testWholeBodyAndRichText();
 testBodyAndTruncationRejections();
 testAuthorAndNativeAnchorRejections();

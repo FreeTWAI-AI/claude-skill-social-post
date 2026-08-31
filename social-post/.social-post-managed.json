@@ -60,6 +60,8 @@
     "scripts/comment_chrome_claim_bridge_test.mjs",
     "scripts/comment_chrome_claim_integration_test.mjs",
     "scripts/comment_chrome_common.mjs",
+    "scripts/comment_chrome_facebook_child_reader.mjs",
+    "scripts/comment_chrome_facebook_child_reader_test.mjs",
     "scripts/comment_chrome_facebook_reader.mjs",
     "scripts/comment_chrome_facebook_reader_test.mjs",
     "scripts/comment_chrome_facebook_surface.mjs",
