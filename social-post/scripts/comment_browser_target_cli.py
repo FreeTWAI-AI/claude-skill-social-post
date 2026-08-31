@@ -98,7 +98,7 @@ def command_browser_target_observation(args: argparse.Namespace) -> None:
 
 def register_target_observation_commands(sub: argparse._SubParsersAction) -> None:
     request = sub.add_parser("browser-target-observation-request")
-    request.add_argument("--platform", required=True, choices=("facebook", "instagram"))
+    request.add_argument("--platform", required=True, choices=("facebook", "instagram", "threads"))
     for key in ("account-key", "post-key", "post-permalink", "platform-comment-id", "comment-permalink", "session-id"):
         request.add_argument("--" + key, required=True)
     request.add_argument("--ttl-minutes", type=int, default=10)

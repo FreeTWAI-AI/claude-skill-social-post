@@ -1383,7 +1383,7 @@ async function observeLiveTargetComment(rawTarget) {
     platform_comment_id: requiredString(raw.platform_comment_id, "target platform_comment_id"),
     comment_permalink: canonicalUrl(requiredString(raw.comment_permalink, "target comment_permalink")).toString(),
   });
-  if (target.platform !== "instagram") fail("native target intake currently supports only Instagram");
+  if (!["instagram", "facebook"].includes(target.platform)) fail("native target intake is unavailable for this platform");
   const authorized = validateScanAuthorization(await runPythonScanRequest({ target }), target);
   const request = authorized.request;
   if (request.observation_scope !== "target_comment"
@@ -1399,9 +1399,14 @@ async function observeLiveTargetComment(rawTarget) {
   const browser = await getSourceOwnedChromeBrowser();
   const tab = await browser.tabs.new();
   try {
+    bindLiveReplyBrowser(tab, browser);
     await tab.goto(request.target.comment_permalink);
-    await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
-    await waitForNativeParent(tab, request.target.comment_permalink);
+    if (request.platform === "instagram") {
+      await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
+      await waitForNativeParent(tab, request.target.comment_permalink);
+    } else {
+      await tab.playwright.getByRole("article").first().waitFor({ state: "visible", timeoutMs: 15000 });
+    }
     const first = await readLiveTargetComment(tab, sourceTarget);
     const second = await readLiveTargetComment(tab, sourceTarget);
     if (digestObject(first.documentBinding) !== digestObject(second.documentBinding) || first.observedUrl !== second.observedUrl
@@ -1423,7 +1428,7 @@ async function observeLiveTargetComment(rawTarget) {
       post_permalink: request.post_permalink, observed_url: second.observedUrl, observed_at: nowIso(),
       authentication_state: "authenticated", account_verified: true, post_verified: true, target_verified: true,
       comment, observation_evidence: {
-        schema_version: 1, adapter_id: "source-owned-instagram-native-target",
+        schema_version: 1, adapter_id: `source-owned-${request.platform}-native-target`,
         adapter_version: LIVE_REPLY_ADAPTER_VERSION, document_binding: second.documentBinding,
         stable_read_count: 2, first_read_digest: firstDigest, second_read_digest: secondDigest,
       },

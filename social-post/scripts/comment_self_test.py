@@ -39,13 +39,17 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_actuator_test.mjs",
     "scripts/comment_chrome_claim_bridge_test.mjs",
     "scripts/comment_chrome_claim_integration_test.mjs",
+    "scripts/comment_chrome_facebook_reader_test.mjs",
     "scripts/comment_chrome_fixture_contract_test.mjs",
     "scripts/comment_chrome_host_authority_test.mjs",
     "scripts/comment_chrome_live_bridge_test.mjs",
     "scripts/comment_chrome_live_surface_test.mjs",
+    "scripts/comment_chrome_live_surface_candidate_cases_test.mjs",
+    "scripts/comment_chrome_live_surface_observation_cases_test.mjs",
     "scripts/comment_chrome_node_frame_lifecycle_test.mjs",
     "scripts/comment_chrome_node_frame_mapping_test.mjs",
     "scripts/comment_chrome_scan_adapters_test.mjs",
+    "scripts/comment_chrome_textarea_identity_test.mjs",
 }
 
 
@@ -79,6 +83,7 @@ def run_js_architecture_config_test() -> None:
     if patterns["fixture"] != [
         "scripts/comment_chrome_fixture_evidence_testonly.mjs",
         "scripts/comment_chrome_fixture_receipt_testonly.mjs",
+        "scripts/comment_chrome_live_surface_fixture_testonly.mjs",
         "scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs",
         "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs",
         "scripts/comment_chrome_node_frame_mapping_fixture_testonly.mjs",
@@ -108,6 +113,17 @@ def run_chrome_actuator_tests() -> None:
         "comment_chrome_actuator_test.mjs",
     ):
         subprocess.run([node, str(Path(__file__).with_name(name))], check=True)
+    facebook_reader_marker = (
+        "PASS Facebook native reader DOM, identity and URL drift tests "
+        "(anonymous; no browser submission)"
+    )
+    facebook_reader = subprocess.run(
+        [node, str(Path(__file__).with_name("comment_chrome_facebook_reader_test.mjs"))],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    if facebook_reader_marker not in facebook_reader.stdout.splitlines():
+        raise AssertionError("Facebook reader child success marker is missing")
+    print(facebook_reader.stdout, end="", flush=True)
     fixture_runner = Path(__file__).with_name("comment_fixture_browser_e2e.mjs")
     subprocess.run([
         node, "--input-type=module", "--eval",

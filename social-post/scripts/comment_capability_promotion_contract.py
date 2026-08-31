@@ -59,6 +59,27 @@ BASE_SOURCES = [
     "scripts/comment_capability_trusted_host_verifier.py",
     "references/comment-policy.json",
 ]
+SCAN_VALIDATION_LEAF_SOURCES = [
+    "scripts/comment_browser_scan_request.py",
+    "scripts/comment_browser_scan_evidence.py",
+    "scripts/comment_browser_scan_completion.py",
+    "scripts/comment_browser_target_contract.py",
+]
+SEND_VALIDATION_LEAF_SOURCES = [
+    "scripts/comment_browser_send_common.py",
+    "scripts/comment_browser_action_contract.py",
+    "scripts/comment_browser_preflight_contract.py",
+    "scripts/comment_browser_result_contract.py",
+]
+LIVE_SURFACE_SOURCES = [
+    "scripts/comment_chrome_live_surface.mjs",
+    "scripts/comment_chrome_live_common.mjs",
+    "scripts/comment_chrome_facebook_surface.mjs",
+    "scripts/comment_chrome_facebook_reader.mjs",
+    "scripts/comment_chrome_threads_surface.mjs",
+    "scripts/comment_chrome_instagram_surface.mjs",
+    "scripts/comment_chrome_instagram_reader.mjs",
+]
 FIXTURE_RUNTIME_SOURCES = [
     "scripts/comment_fixture_promotion_envelope.py",
     "scripts/comment_fixture_browser_e2e.mjs",
@@ -116,7 +137,7 @@ TEST_ONLY_FULL_LIFECYCLE_NEGATIVES = [
     "live_authority_attempt",
     "live_plan_mint_attempt",
 ]
-TEST_ONLY_FULL_LIFECYCLE_MAPPING_SOURCES = [
+TEST_ONLY_FULL_LIFECYCLE_MAPPING_SOURCES = LIVE_SURFACE_SOURCES + [
     "scripts/comment_capability_promotion_contract.py",
     "scripts/comment_capability_receipt_support.py",
     "scripts/comment_capability_mapping_evidence.py",
@@ -200,7 +221,7 @@ REQUIREMENTS: dict[str, dict[str, Any]] = {
         "scope": "controlled_browser_frame_mapping",
         "promotion": True,
         "max_age_seconds": 900,
-        "sources": BASE_SOURCES + [
+        "sources": BASE_SOURCES + LIVE_SURFACE_SOURCES + [
             "scripts/comment_chrome_actuator.mjs",
             "scripts/comment_chrome_common.mjs",
             "scripts/comment_chrome_host_authority.mjs",
@@ -228,7 +249,7 @@ REQUIREMENTS: dict[str, dict[str, Any]] = {
         "scope": "authenticated_meta_draft_only",
         "promotion": True,
         "max_age_seconds": 900,
-        "sources": BASE_SOURCES + [
+        "sources": BASE_SOURCES + SCAN_VALIDATION_LEAF_SOURCES + LIVE_SURFACE_SOURCES + [
             "scripts/comment_browser_contract.py",
             "scripts/comment_browser_provenance.py",
             "scripts/comment_browser_scan_contract.py",
@@ -245,7 +266,7 @@ REQUIREMENTS: dict[str, dict[str, Any]] = {
         "scope": "current_session_explicitly_approved_send",
         "promotion": True,
         "max_age_seconds": 300,
-        "sources": BASE_SOURCES + [
+        "sources": BASE_SOURCES + SEND_VALIDATION_LEAF_SOURCES + LIVE_SURFACE_SOURCES + [
             "scripts/comment_authorization.py",
             "scripts/comment_browser_send_contract.py",
             "scripts/comment_chrome_claim_bridge.mjs",
@@ -254,6 +275,7 @@ REQUIREMENTS: dict[str, dict[str, Any]] = {
             "scripts/comment_chrome_send.mjs",
             "scripts/comment_chrome_send_support.mjs",
             "scripts/comment_domain.py",
+            "scripts/comment_reply_context_validation.py",
             "scripts/comment_policy.py",
         ],
     },
@@ -263,12 +285,13 @@ REQUIREMENTS: dict[str, dict[str, Any]] = {
         "scope": "current_session_bounded_auto_canary",
         "promotion": True,
         "max_age_seconds": 300,
-        "sources": BASE_SOURCES + [
+        "sources": BASE_SOURCES + SEND_VALIDATION_LEAF_SOURCES + LIVE_SURFACE_SOURCES + [
             "scripts/comment_assistant.py",
             "scripts/comment_authorization.py",
             "scripts/comment_browser_send_contract.py",
             "scripts/comment_chrome_claim_bridge.mjs",
             "scripts/comment_domain.py",
+            "scripts/comment_reply_context_validation.py",
             "scripts/comment_policy.py",
             "scripts/comment_state.py",
         ],

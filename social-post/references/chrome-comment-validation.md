@@ -73,3 +73,41 @@ closed inventory 固定涵蓋所有 `scripts/comment_chrome_*.mjs`、`scripts/co
 receipt 的 `evaluator_sha256` 綁定 gate／contract／core／loaders／receipt／selftest 六個 evaluator 的實際 bytes；`inventory_sha256`、`graph_sha256`、`policy_sha256` 與 `report_sha256` 則是本次 inventory／含 reviewed external dependency 的圖／政策／報告證據，所有路徑保持相對。fixture runner 會再把這六個 evaluator 納入當次 source snapshot，重新枚舉並逐 byte 核對完整 closed inventory，再精確核對 `evaluator_files`、external dependency 與 browser-client bytes，並重算 evaluator、inventory 與 graph digest；因此舊版／弱化 evaluator、外部 boundary 或任一 inventory member 漂移後留下的 PASS receipt 都不能被當成 fresh。receipt 與 `<receipt>.sha256` detached hash 都以同目錄 exclusive temp、flush、atomic rename、readback 寫入；注入 rename 前失敗時必須保留舊檔並清掉受約束 temp。`comment_self_test.py` 仍以實際 receipt bytes 重算 sidecar 並逐字比對。`--output` 只接受 immediate `.rd/receipts/*.json`，逐層拒絕 symlink／junction，既有 receipt 與 sidecar 也必須是 regular non-symlink file，不能拿 gate 覆寫 source、`SKILL.md` 或任意路徑。`.rd/**` 已從 Cleanup inventory 排除，避免 evidence 自我引用。這是 social-post 的產品原生 JS gate，只補足 Cleanup 對 JavaScript architecture 的 `NOT_CHECKED`；不得回寫或改稱 Cleanup provider 本身已通過跨語言架構驗證。
 
 三平台 Browser fixture 另在 `finally` 比對全部 `data/` inventory、policy、canonical capability ledger、公開 projection 與實際 dependency source bytes；缺檔與新建空檔必須可區分，lock／temp／任一 parent junction 或 symlink 漂移都要阻擋。native gate 同時鎖定 E2E 的五個直接 target、完整 transitive module closure、禁止未審核的 Node builtin／global／loader 權限，並把 filesystem authority、Node imports 與 public function surface 限縮到逐模組 exact allowlist；fixture closure 只核准 E2E runner 的 `typeof process` 與 `process.argv`，`process.pid`、`process.binding`／`_linkedBinding`／`getBuiltinModule`、computed／alias 變形與 `globalThis.process` 一律 fail closed。固定 receipt persistence 是 E2E runner 的 module-private 路徑，不存在可接收合成 PASS JSON 的公開 writer；發布時持有 Social Post 合作式 writer 共用的 `data/.write.lock`，先 stage、發布前後重驗 protected state。若 half-publish、readback 或 cleanup 失敗，會先恢復發布前已驗證的舊 receipt pair；恢復也失敗時才刪除整對檔案並 fail closed。這把鎖只序列化遵守同一協議的 Social Post writer，不代表作業系統或其他程式的全域 serialization；crash 留下 stale lock 時需人工確認並復原，fixture 仍不可升級正式能力。send／scan core 仍不得取得 fs write authority。2026-08-30 已完成受控 localhost Browser E2E：FB／IG／Threads 各掃到 2 則 fixture 留言、各恰有 1 次 test-only submit attempt，並確認正確 parent 與 exact reply 可見；receipt 仍固定為 `localhost_test_only_candidate`、`capability_promotion_eligible=false`、`live_browser_actuation_enabled=false`。它沒有接觸真實 Meta，也不證明已登入 Meta host、trusted Chrome host、穩定 live tab/frame/document mapping、live draft／send 或 bounded auto eligibility，因此不得自動升級 capability ledger 或打開 live policy。
+
+## Reinspection JSON example
+
+完整欄位示例如下；仍須遵守 [Reinspection 契約](chrome-comment-adapter.md#6-reinspection) 的父層、基線、一次性 capability、完整展開與不得重送規則。此示例不是可手工提交的 live receipt，正式證據只能由來源持有的 fused actuator 取得並提交。
+
+```json
+{
+  "schema_version": 1,
+  "test_only": false,
+  "action_id": "immutable-browser-action-id",
+  "preflight_id": "accepted-browser-preflight-id",
+  "preparation_id": "accepted-preparation-id",
+  "claim_id": "durable-submit-claim-id",
+  "intent_id": "reply-intent-id",
+  "session_id": "current-reinspection-session",
+  "attempt_session_id": "original-send-session",
+  "scope": {
+    "platform": "instagram",
+    "account_key": "expected-account",
+    "post_key": "platform-post-id",
+    "comment_key": "canonical-comment-key"
+  },
+  "comment_fingerprint": "fingerprint-id",
+  "reply_hash": "sha256-from-action",
+  "observed_url": "https://www.instagram.com/p/example",
+  "observed_at": "2026-08-28T12:05:00+00:00",
+  "account_verified": true,
+  "post_verified": true,
+  "target_verified": true,
+  "parent_verified": true,
+  "exact_reply_visible": true,
+  "own_author_verified": true,
+  "absence_verified": false,
+  "own_author_reply_count": 1,
+  "reinspection_total_reply_count": 4,
+  "evidence": "exact own-account reply found after reload"
+}
+```

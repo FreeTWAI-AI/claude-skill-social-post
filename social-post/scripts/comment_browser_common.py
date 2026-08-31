@@ -135,6 +135,9 @@ def _require_post_url(
         if current_identity["query"] != target_identity["query"]:
             raise ValueError(f"{label} query differs from approved post_permalink")
         return current
+    if platform == "threads":
+        _threads_native_post_id(current_parts.path, current_parts.query, label)
+        _threads_native_post_id(target_parts.path, target_parts.query, "post_permalink")
     if current_parts.path != target_parts.path:
         raise ValueError(f"{label} path differs from approved post_permalink")
     expected_query = Counter(parse_qsl(target_parts.query, keep_blank_values=True))
@@ -142,6 +145,16 @@ def _require_post_url(
     if any(current_query[pair] < count for pair, count in expected_query.items()):
         raise ValueError(f"{label} query differs from approved post_permalink")
     return current
+
+
+def _threads_native_post_id(path: str, query: str, label: str) -> str:
+    """Require one query-free native Threads post identity, never a child path."""
+    match = re.fullmatch(r"/@[A-Za-z0-9._-]+/post/([A-Za-z0-9_-]+)", path)
+    if not match:
+        raise ValueError(f"Threads {label} is not a stable native post")
+    if query:
+        raise ValueError(f"Threads {label} cannot contain a query")
+    return match[1]
 
 
 def _require_comment_permalink_for_post(
@@ -177,10 +190,16 @@ def _require_comment_permalink_for_post(
             raise ValueError("Instagram comment_permalink ID differs from platform_comment_id")
         return comment
     if platform == "threads":
-        if not re.fullmatch(r"/@[^/]+/post/[^/]+", comment_parts.path):
-            raise ValueError("Threads comment_permalink is not a stable reply post")
-        if comment_parts.query:
-            raise ValueError("Threads comment_permalink cannot contain a query")
+        comment_id = _threads_native_post_id(
+            comment_parts.path, comment_parts.query, "comment_permalink",
+        )
+        post_id = _threads_native_post_id(
+            post_parts.path, post_parts.query, "post_permalink",
+        )
+        if comment_id == post_id:
+            raise ValueError("Threads root post cannot be its own comment")
+        if comment_id != platform_comment_id:
+            raise ValueError("Threads comment_permalink ID differs from platform_comment_id")
         return comment
     post_path = post_parts.path.rstrip("/") or "/"
     if not (

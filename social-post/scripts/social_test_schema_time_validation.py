@@ -282,7 +282,7 @@ def check_every_ledger_has_a_schema_gate() -> None:
         raise AssertionError(f"correction unsupported schema passed: {correction_errors}")
 
 
-def check_snapshot_evidence_manifest() -> None:
+def _check_post_snapshot_evidence_manifest() -> None:
     source = analyzed_post()
     post_validation_errors: list[str] = []
     posts_by_id = validate_posts([source], post_validation_errors, [])
@@ -325,7 +325,9 @@ def check_snapshot_evidence_manifest() -> None:
     if not any("must be unique" in error for error in snapshot_errors(duplicate_path)):
         raise AssertionError("duplicate evidence path passed")
 
-    account = {
+
+def _account_evidence_manifest_fixture() -> dict:
+    return {
         "schema_version": "1.0",
         "account_snapshot_id": "account-evidence-manifest",
         "platform": "instagram",
@@ -341,6 +343,8 @@ def check_snapshot_evidence_manifest() -> None:
         },
     }
 
+
+def _check_account_evidence_manifest(account: dict) -> None:
     def account_errors(candidate: dict) -> list[str]:
         errors: list[str] = []
         validate_account_snapshots([candidate], errors, [])
@@ -361,6 +365,8 @@ def check_snapshot_evidence_manifest() -> None:
     ):
         raise AssertionError("account snapshot invalid evidence digest passed")
 
+
+def _check_account_evidence_manifest_correction(account: dict) -> None:
     legacy_account = copy.deepcopy(account)
     legacy_account["evidence"] = ["C:/private/account.jpg"]
     legacy_account["evidence_sha256"] = {"account.jpg": "a" * 64}
@@ -387,6 +393,13 @@ def check_snapshot_evidence_manifest() -> None:
         "C:/private/account.jpg": "b" * 64,
     }:
         raise AssertionError("evidence manifest correction merged obsolete path keys")
+
+
+def check_snapshot_evidence_manifest() -> None:
+    _check_post_snapshot_evidence_manifest()
+    account = _account_evidence_manifest_fixture()
+    _check_account_evidence_manifest(account)
+    _check_account_evidence_manifest_correction(account)
 
 
 def check_account_latest_surface_index() -> None:

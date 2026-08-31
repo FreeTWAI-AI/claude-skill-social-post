@@ -37,6 +37,8 @@ Python 不能直接 import Codex 的 Chrome 工具，因此 bridge 不是背景 
 
 ## 當前實作狀態（不是完成宣告）
 
+Native target 目前 IG 已實證；Facebook whole-body reader 為本輪 candidate，不代表送出能力；Threads 僅有 exact identity 契約，父子 UI 關係仍待驗證，尚無 canary。
+
 - `scanAndCommit(tab, target, locatorPlan, options)`：來源綁定的 Chrome 掃描與私有帳本回填；正式模式由受信任 host 取得證據，不接受 caller 自行捏造的 receipt。參數型態以 bridge 實作為準。
 - `observeTargetComment({ platform, account_key, post_key, post_permalink, platform_comment_id, comment_permalink, session_id, ttl_minutes? })`：候選 fused 只讀入口，目前來源 reader 僅支援 IG 原生父留言。先建立 target-only request，再於來源持有的 tab 雙讀完整作者／本文／原生 anchor，以私有 bearer 回填 canonical observation；不接收 caller 的 tab、body、author、receipt 或 resolver。
 - `executeCanaryReply({ intentId, sessionId, leaseId })`：限單則 IG 入口。只接受已核准 action 與有效 lease，重新核對正數回覆展開、零既有 own reply、原生父留言選擇及單行核准文字；durable claim 後最多點擊一次，再讀取正確父層的新 native child。無 lease、自訂 callback、source drift、過期或證據不足皆停止。2026-08-31 已完成一次真實單次送出；即時回讀不足時先記 `needs_reconcile`，之後經新 session 的唯讀 recovery 查證原生子回覆並結算 `sent`，全程未重送。這是單一案例，不是三平台／批次驗證。
@@ -367,39 +369,7 @@ live P5 不用 raw `finish-send --evidence`。raw `begin-send`／`finish-send` �
 - `reinspect()`／recovery 也必須重新取得同一份 versioned terminal exhaustion authority；初始空畫面、兩次空 read、無 terminal cursor／traversal、terminal count 與可檢查 collection 不相等時，連可提交的 absence receipt 都不鑄造，recovery 維持 blocked／unknown，不能推導 `reconciled_not_sent`。
 - 仍不確定：`browser-reconcile` 追加 `browser_reinspection_observed` 稽核事件，消耗舊 capability、輪替新的 reconcile capability，狀態仍為 `needs_reconcile` 且不得重送。這讓每一份 fresh reinspection 都是一次性，不會反覆重播同一張收據。
 
-```json
-{
-  "schema_version": 1,
-  "test_only": false,
-  "action_id": "immutable-browser-action-id",
-  "preflight_id": "accepted-browser-preflight-id",
-  "preparation_id": "accepted-preparation-id",
-  "claim_id": "durable-submit-claim-id",
-  "intent_id": "reply-intent-id",
-  "session_id": "current-reinspection-session",
-  "attempt_session_id": "original-send-session",
-  "scope": {
-    "platform": "instagram",
-    "account_key": "expected-account",
-    "post_key": "platform-post-id",
-    "comment_key": "canonical-comment-key"
-  },
-  "comment_fingerprint": "fingerprint-id",
-  "reply_hash": "sha256-from-action",
-  "observed_url": "https://www.instagram.com/p/example",
-  "observed_at": "2026-08-28T12:05:00+00:00",
-  "account_verified": true,
-  "post_verified": true,
-  "target_verified": true,
-  "parent_verified": true,
-  "exact_reply_visible": true,
-  "own_author_verified": true,
-  "absence_verified": false,
-  "own_author_reply_count": 1,
-  "reinspection_total_reply_count": 4,
-  "evidence": "exact own-account reply found after reload"
-}
-```
+完整欄位示例見 [Reinspection JSON example](chrome-comment-validation.md#reinspection-json-example)。
 
 ```js
 const { receipt: reinspection, commit: reconcileCommit } =
