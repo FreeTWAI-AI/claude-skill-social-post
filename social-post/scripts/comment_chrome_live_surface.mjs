@@ -6,6 +6,7 @@ import { inspectThreads } from "./comment_chrome_threads_surface.mjs";
 import { inspectInstagram } from "./comment_chrome_instagram_surface.mjs";
 import { readLiveTargetComment as readInstagramTargetComment } from "./comment_chrome_instagram_reader.mjs";
 import { readFacebookTargetComment } from "./comment_chrome_facebook_reader.mjs";
+import { readThreadsTargetComment } from "./comment_chrome_threads_reader.mjs";
 
 export { bindLiveReplyBrowser } from "./comment_chrome_facebook_surface.mjs";
 export { liveReplyUrl } from "./comment_chrome_live_common.mjs";
@@ -13,11 +14,12 @@ export {
   prepareLiveReplyThread, inspectLiveCanaryResult,
 } from "./comment_chrome_instagram_surface.mjs";
 
-export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.4";
+export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.5";
 
 export async function readLiveTargetComment(tab, target) {
   if (target?.platform === "instagram") return readInstagramTargetComment(tab, target);
   if (target?.platform === "facebook") return readFacebookTargetComment(tab, target);
+  if (target?.platform === "threads") return readThreadsTargetComment(tab, target);
   fail("native target reader has not been verified for this platform");
 }
 

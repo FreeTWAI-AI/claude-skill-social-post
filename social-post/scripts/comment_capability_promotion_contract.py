@@ -77,6 +77,7 @@ LIVE_SURFACE_SOURCES = [
     "scripts/comment_chrome_facebook_surface.mjs",
     "scripts/comment_chrome_facebook_reader.mjs",
     "scripts/comment_chrome_threads_surface.mjs",
+    "scripts/comment_chrome_threads_reader.mjs",
     "scripts/comment_chrome_instagram_surface.mjs",
     "scripts/comment_chrome_instagram_reader.mjs",
 ]

@@ -1383,7 +1383,7 @@ async function observeLiveTargetComment(rawTarget) {
     platform_comment_id: requiredString(raw.platform_comment_id, "target platform_comment_id"),
     comment_permalink: canonicalUrl(requiredString(raw.comment_permalink, "target comment_permalink")).toString(),
   });
-  if (!["instagram", "facebook"].includes(target.platform)) fail("native target intake is unavailable for this platform");
+  if (!["instagram", "facebook", "threads"].includes(target.platform)) fail("native target intake is unavailable for this platform");
   const authorized = validateScanAuthorization(await runPythonScanRequest({ target }), target);
   const request = authorized.request;
   if (request.observation_scope !== "target_comment"
@@ -1404,6 +1404,15 @@ async function observeLiveTargetComment(rawTarget) {
     if (request.platform === "instagram") {
       await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
       await waitForNativeParent(tab, request.target.comment_permalink);
+    } else if (request.platform === "threads") {
+      const column = tab.playwright.locator('[role="region"][aria-label="直欄內文"]');
+      await column.waitFor({ state: "visible", timeoutMs: 15000 });
+      await column.locator('[data-pagelet="threads_post_page_0"]')
+        .locator(`a[href=${JSON.stringify(new URL(request.post_permalink).pathname)}]`)
+        .waitFor({ state: "visible", timeoutMs: 15000 });
+      await column.locator('[data-pagelet="threads_post_page_1"]')
+        .locator(`a[href=${JSON.stringify(new URL(request.target.comment_permalink).pathname)}]`)
+        .waitFor({ state: "visible", timeoutMs: 15000 });
     } else {
       await tab.playwright.getByRole("article").first().waitFor({ state: "visible", timeoutMs: 15000 });
     }

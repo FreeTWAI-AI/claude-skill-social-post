@@ -6,7 +6,7 @@
 
 Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime revision／雜湊、架構自校準與單次送出／異常恢復的回歸測試。另已完成一次 IG 真實單次送出、原生子回覆查證與唯讀 recovery 對帳；這些證據不代表三平台 live Meta 回覆已解鎖。
 
-> `main` 已分開掃描與送出開關：受控、指定 scope 的來源綁定掃描可用；`live_browser_actuation_enabled` 仍預設為 `false`。真實送出／結果回讀未完成三平台 canary，不能宣稱全面自動回覆已完成。
+> `main` 已分開讀取與送出開關：IG／Threads 指定原生留言的 target-only 回填已有實證；整篇掃描未開放，`live_browser_actuation_enabled` 仍預設為 `false`。真實送出／結果回讀未完成三平台 canary，不能宣稱全面自動回覆已完成。
 
 本候選版仍未完成三平台真實自動回覆驗收。過長契約與平台程式已按責任拆分，完整測試通過；但離線測試不能代替 FB／Threads 的登入操作、完整回覆串與父層驗證。穩定標籤仍為 v2.5.0，沒有新建正式 Release 或升級 production capability。
 
@@ -14,9 +14,9 @@ Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime 
 
 ## Unreleased on main
 
-- 共用掃描、送出、領域驗證與各平台 DOM reader 已模組化；所有新增執行依賴仍納入來源雜湊與精確公開清單。架構檢查為 56 個模組、151 條內部依賴、0 循環。
+- 共用掃描、送出、領域驗證與各平台 DOM reader 已模組化；所有新增執行依賴仍納入來源雜湊與精確公開清單。架構檢查為 58 個模組、155 條內部依賴、0 循環。
 - 新增 FB 原生留言完整本文候選 reader，涵蓋 IMG.alt／BR、作者歧義、在線狀態連結、父子網址與驗證途中換頁的負向測試。實際回填在 Chrome 連線中斷時停止，未送出 FB 留言，不能視為 live 驗收通過。
-- Threads 原生 target 契約會核對不同的 root／comment ID、精準 host、query-free 網址與 observed parent；目前可見列的先後順序不足以證明父子關係，因此沒有新增假完成的 live reader。
+- Threads 原生 reader 以明確的 root／focus pagelet context、原生時間連結、完整本文與帳號雙讀核對指定留言；一則真實 target-only 回填已完成。拒絕錯誤父層、截斷、載入中及 URL／帳號漂移；「尚無回覆」只記為候選訊號，不當作完整空串或送出授權。
 - 新增 `observeTargetComment`：只回填一則指定原生留言，保留完整作者／本文與來源憑證，不冒充整篇掃描完成。
 - 新增獨立的單則 IG `executeCanaryReply` 候選入口：只能使用已核准 action、最長 300 秒且限一次的來源綁定 lease；正式送出開關維持關閉，不因 canary 自動升級三平台能力。
 - 一次真實 IG 執行已驗證「單次送出 → 即時回讀不足而停止 → 新 session 唯讀 recovery → 原帳本確認 sent」，沒有重送；真實本文、帳號與回覆連結只保留在私人帳本。
@@ -24,7 +24,7 @@ Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime 
 - IG 原生回覆保留平台自動產生的 `@mention`，先確認完整回覆串與零自己回覆；以實際頁面連續核對處理巢狀展開與延後載入，不假造瀏覽器未提供的 document epoch。未知結果停止並進入唯讀對帳。
 - 新增 default-only `executeApprovedReply` 候選入口與 read-only recovery，拒絕 caller tab／action／selector／callback；原核准文字、帳號、貼文、留言及原 attempt 都必須一致。
 - 更新 Codex Chrome runtime 固定版本至 `26.825.51511`，保留 bytes／SHA-256 驗證。
-- Threads 先前只核對可見原文、帳號與回覆視窗；不能把零個可見回覆當作完整空串，父子語義尚待授權樣本驗證，未實際送出。FB 已辨識既有自己回覆，但完整展開與編輯器選定父層尚未驗證。IG 原生留言頁已核對帳號、完整本文、父子留言、正數回覆展開及原生 mention 編輯器；真實送出仍限獨立 canary，不代表泛用路徑已開放。
+- Threads 已驗證一則原生父層 context 與 target-only 回填；完整回覆串、選定編輯器、送出與新子回覆查證仍未驗收。FB 已辨識既有自己回覆，但完整展開與編輯器選定父層尚未驗證。IG 原生留言頁已核對帳號、完整本文、父子留言、正數回覆展開及原生 mention 編輯器；真實送出仍限獨立 canary，不代表泛用路徑已開放。
 - 修正 Facebook story query 身分保留與完整度判定；支援 Instagram 同一 shortcode 的 `p/reel/reels/tv` 網址及 `/p/S/c/P` 留言，拒絕跨貼文、重複或矛盾識別欄位。IG 內顯示的 Facebook 留言數不得混入 IG 掃描。
 - 公開版本只含通用程式與匿名測試。真實留言、草稿、帳號洞察、原文、照片與私人憑證不在發布範圍內。
 

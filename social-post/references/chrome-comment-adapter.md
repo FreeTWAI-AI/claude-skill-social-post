@@ -37,14 +37,14 @@ Python 不能直接 import Codex 的 Chrome 工具，因此 bridge 不是背景 
 
 ## 當前實作狀態（不是完成宣告）
 
-Native target 目前 IG 已實證；Facebook whole-body reader 為本輪 candidate，不代表送出能力；Threads 僅有 exact identity 契約，父子 UI 關係仍待驗證，尚無 canary。
+Native target 目前 IG、Threads 已完成真實指定留言回填；Facebook whole-body reader 仍為 candidate。Threads 以原生 context pagelet 核對父貼文與焦點留言，不再以任意列順序代替層級；這不代表送出／整串完整性已驗證。
 
 - `scanAndCommit(tab, target, locatorPlan, options)`：來源綁定的 Chrome 掃描與私有帳本回填；正式模式由受信任 host 取得證據，不接受 caller 自行捏造的 receipt。參數型態以 bridge 實作為準。
-- `observeTargetComment({ platform, account_key, post_key, post_permalink, platform_comment_id, comment_permalink, session_id, ttl_minutes? })`：候選 fused 只讀入口，目前來源 reader 僅支援 IG 原生父留言。先建立 target-only request，再於來源持有的 tab 雙讀完整作者／本文／原生 anchor，以私有 bearer 回填 canonical observation；不接收 caller 的 tab、body、author、receipt 或 resolver。
+- `observeTargetComment({ platform, account_key, post_key, post_permalink, platform_comment_id, comment_permalink, session_id, ttl_minutes? })`：fused 只讀入口，具備 IG／Facebook／Threads 原生 reader。先建立 target-only request，再於來源持有的 tab 雙讀完整作者／本文／原生 anchor，以私有 bearer 回填 canonical observation；不接收 caller 的 tab、body、author、receipt 或 resolver。各平台的實證範圍依本節分開記錄。
 - `executeCanaryReply({ intentId, sessionId, leaseId })`：限單則 IG 入口。只接受已核准 action 與有效 lease，重新核對正數回覆展開、零既有 own reply、原生父留言選擇及單行核准文字；durable claim 後最多點擊一次，再讀取正確父層的新 native child。無 lease、自訂 callback、source drift、過期或證據不足皆停止。2026-08-31 已完成一次真實單次送出；即時回讀不足時先記 `needs_reconcile`，之後經新 session 的唯讀 recovery 查證原生子回覆並結算 `sent`，全程未重送。這是單一案例，不是三平台／批次驗證。
 - `executeApprovedReply({ intentId, sessionId })`：新增候選 fused 路徑。只讀取本機已核准 action，私有 tab 驗證原留言、編輯器、完整本文與穩定節點，durable claim 後最多點擊一次，再由私有 bridge 提交結果。預設開關仍關閉。
 - `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 claim、不 submit。新的唯讀 `browser-recovery-action` 會核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。同程序 unknown 保留私有原 attempt 與輪替 capability；真正重啟後用不同 recovery session 接回，不能偽稱重啟。已消耗 canary 即使 lease 到期仍可唯讀結算，不會重新取得送出權。
-- Threads 已完成指定樣本的帳號、原貼文、原留言、零回覆狀態與編輯器只讀驗證；尚無本版真實送出／結果回讀 canary。不得宣稱 sent 或完整自動回覆已驗證。
+- Threads 已完成指定樣本的帳號、原貼文、原留言、完整本文與私人帳本雙讀回填。reader 要求同一原生 context 容器內相鄰的 `threads_post_page_0`／`threads_post_page_1`、各自唯一的原生時間連結、精確焦點網址與標題連結；截斷、載入中、錯作者／父層一律拒絕。焦點容器的「尚無回覆」只輸出 `zeroReplyCandidate`，不升級 complete／absence。回覆 dialog 已唯讀核對，尚無本版真實送出／結果回讀 canary。
 - FB 已辨識指定樣本的既有自己回覆及其 form；完整展開與 composer actor 尚未驗證，因此 `complete=false`。story／permalink query 解析保留並核對 `story_fbid`＋`id`，不能因未解析出留言就宣稱完整零結果。
 - IG 已在使用者指定樣本完成 native comment page 的 account／parent／whole-body／child-permalink／composer 只讀正反驗證。`p/reel/reels/tv` 僅在同 host、shortcode 與 query 時視為同貼文；原生留言 `/p/S/c/P/` 與子回覆 `/p/S/c/P/r/R/` 分別綁定層級。未展開的回覆不能當零；shared textarea 的 `@author` 自動帶入不能單獨證明選中了正確父留言。泛用 surface 仍 `complete=false`；單則驗證只可走獨立 canary 入口，不能推導 absence 或整篇掃描完成。
 - native canary 先確認尚未選取的 editor 為空；點選指定父留言後，原生 `@author ` 前綴必須與核准 reply 完全相容並保留。preflight 如實記為 `composer_empty_before_fill=false`、`composer_initial_state=native_target_mention`，另綁來源持有的 selection evidence，不偽稱原生帶入後仍是空框。Chrome proxy 沒有可用的實體 document epoch；`document_binding.kind=source_owned_ui_continuity` 只綁來源 tab、exact URL、帳號與完整作者／本文摘要，不保證同 URL reload 偵測，也不升級完整 lifecycle／absence authority。
@@ -110,10 +110,11 @@ fail closed。actuator 不分類風險、不產生回覆、不建立 permit，�
 
 ## 連線與 tab
 
-1. 依 `chrome:control-chrome` 選取 Google Chrome，完整讀取該 browser 的 runtime documentation。
+1. 依 `chrome:control-chrome` 使用 Google Chrome；P5 fused 程式從 `comment_chrome_runtime_authority.mjs` 的 `getSourceOwnedChromeBrowser()` 取得並快取 browser。操作方也重用這個 getter 回傳的 binding，完整讀取其 runtime documentation、命名 session 後才操作；不要另做第二套 setup／get 導致操作方與來源程式各持不同 binding。
 2. 使用指定貼文 permalink；不要從首頁猜貼文。
 3. 沿用同一 browser binding。tab 遺失時只重新取得 tab，不重新初始化整個 browser runtime。
 4. 遇登入、2FA、CAPTCHA、checkpoint、限制訊息或錯誤 banner，停止，不建立 authenticated scan。
+5. 舊操作方 binding 失效不等於整個 Chrome 離線；先檢查已存在的來源持有 binding。不能以重複初始化修復 tab，也不要求使用者關閉整個 Facebook。需要收起聊天浮窗時只辨識收合／關閉控制，不讀私訊、不刪對話；無法安全收起時維持貼文容器內的唯讀範圍。
 
 ## 畫面定位原則
 

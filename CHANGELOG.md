@@ -6,18 +6,19 @@
 
 - Facebook exact-native target reader candidate with whole-body/emoji extraction, observed author checks, positive own-child detection, URL/account continuity and anonymous DOM-parser regressions. Live intake did not complete because the Chrome connection failed; this is not verified Facebook sending.
 - Exact Threads root/target ID, same-host and query-free URL guards; reject self-root, child paths, duplicate/conflicting identifiers and false observed-parent URLs.
+- Threads source-owned native target reader with explicit root/focus context, whole-body extraction and account/URL continuity. One real target-only observation reached the private canonical ledger; anonymous DOM regressions cover wrong parent, truncation, loading and identity drift. Zero-reply UI remains non-authoritative for sending.
 - Source-owned, single-action Instagram canary and read-only recovery: one real reply was independently observed and its original attempt reconciled as sent without resubmission. Private reply data is excluded from this repository.
 - Canonical post-analysis fields for exact caption/hash, deterministic length, layout and black-card properties, keywords/entities/numeric language, voice/CTA, Unicode punctuation, exact date/weekday/minute/daypart, outcome qualifiers and cross-surface conflicts.
 - A digest-based `coverage` gate proving every eligible post reaches the P0/P2 feature matrix, with an independent exact-compare dimension for every applicable extended analytics subtree and no private caption/path exposure in the audit receipt.
 - Mandatory canonical comparables/context consumption before planning and drafting, with exact platform/maturity/content-type/surface cohorts and non-causal timing treatment.
-- Product-native JavaScript architecture gate with an exact 56-module role manifest, 151 measured internal static edges, one exact reviewed external lazy dependency, cycle detection, required-edge checks and atomic receipt plus detached hash evidence.
+- Product-native JavaScript architecture gate with an exact 58-module role manifest, 155 measured internal static edges, one exact reviewed external lazy dependency, cycle detection, required-edge checks and atomic receipt plus detached hash evidence.
 - Eighty calibrated architecture checks covering the exact browser-client source/specifier/kind/cardinality boundary, eager or drifted imports, graph-digest coverage, template-expression parsing, common loader aliases and member calls, inventory drift, role boundaries, receipt path safety and atomic-write failure cases.
 - Explicit internal obligations for a trusted Chrome host resolver and stable node/frame mapping before any authenticated browser canary.
 
 ### Changed
 
 - Split long scan/send/domain contracts and platform readers into focused modules while preserving prior exports and guards. Bind every extracted authority dependency into canary and promotion source inventories.
-- Split surface/textarea tests and move the reinspection JSON example into the validation reference without changing its fields. Live adapter candidate revision is `2026-08-31.4`.
+- Split surface/textarea tests and move the reinspection JSON example into the validation reference without changing its fields. Live adapter candidate revision is `2026-08-31.5`.
 - Split the actuator test suite into focused modules and froze the 22-case runner manifest, names and execution order.
 - Split send orchestration from reusable send support while preserving fail-closed claim, reply-exhaustion, reconciliation and recovery behavior.
 - Added post-navigation fixture readiness checks for exact loopback URL, runtime identity, platform/account/post binding and exactly two visible targets.

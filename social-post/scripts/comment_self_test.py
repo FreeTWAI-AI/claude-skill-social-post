@@ -50,6 +50,7 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_node_frame_mapping_test.mjs",
     "scripts/comment_chrome_scan_adapters_test.mjs",
     "scripts/comment_chrome_textarea_identity_test.mjs",
+    "scripts/comment_chrome_threads_reader_test.mjs",
 }
 
 
@@ -124,6 +125,17 @@ def run_chrome_actuator_tests() -> None:
     if facebook_reader_marker not in facebook_reader.stdout.splitlines():
         raise AssertionError("Facebook reader child success marker is missing")
     print(facebook_reader.stdout, end="", flush=True)
+    threads_reader_marker = (
+        "PASS Threads native reader DOM, identity and URL drift tests "
+        "(anonymous; no browser submission)"
+    )
+    threads_reader = subprocess.run(
+        [node, str(Path(__file__).with_name("comment_chrome_threads_reader_test.mjs"))],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    if threads_reader_marker not in threads_reader.stdout.splitlines():
+        raise AssertionError("Threads reader child success marker is missing")
+    print(threads_reader.stdout, end="", flush=True)
     fixture_runner = Path(__file__).with_name("comment_fixture_browser_e2e.mjs")
     subprocess.run([
         node, "--input-type=module", "--eval",

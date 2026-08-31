@@ -92,6 +92,8 @@
     "scripts/comment_chrome_send.mjs",
     "scripts/comment_chrome_send_support.mjs",
     "scripts/comment_chrome_textarea_identity_test.mjs",
+    "scripts/comment_chrome_threads_reader.mjs",
+    "scripts/comment_chrome_threads_reader_test.mjs",
     "scripts/comment_chrome_threads_surface.mjs",
     "scripts/comment_cli_support.py",
     "scripts/comment_domain.py",
