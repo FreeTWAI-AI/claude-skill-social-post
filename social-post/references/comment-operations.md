@@ -1,6 +1,6 @@
 # Chrome Comment Operations（零 API）
 
-> last_verified: 2026-08-30
+> last_verified: 2026-08-31
 > scope: 使用已登入 Chrome，處理 Facebook／Instagram／Threads 可見文字留言；不使用 Meta API。
 
 這是 P5 Comment Ops 的唯一共用流程。平台畫面細節仍要讀目標平台 reference，並以當下可見 UI 為準。
@@ -17,8 +17,8 @@
 
 ## 能力邊界
 
-- 能做：使用者啟動後，掃描指定貼文的可見留言、去重、同語言草擬、整批確認、逐則回覆、畫面驗證與稽核。
-- 能做：當前 session 內，對低風險白名單留言做有上限的 `bounded_auto`；每一則仍建立一次性 permit。
+- 流程涵蓋：指定貼文／原生留言的來源綁定回填、去重、同語言草擬、確認、逐則回覆與稽核；目前 production 送出仍 default-off，可執行狀態以 `chrome-comment-adapter.md` 為準。
+- IG exact-target intake 與限一則、最長 300 秒的已授權 canary lease 已完成一次真實送出及原生子回覆查證；即時結果不明先停下，真正重啟後唯讀 recovery 已將同一筆原 attempt 結算為 `sent`，沒有重送。這不是 `bounded_auto` 啟用或三平台完成；白名單 batch 自動化仍需獨立能力驗證與當前 session 授權。
 - 不能做：24/7 背景監聽、Webhook 即時通知、無邊界 `auto_everything`、私訊派發、媒體／GIF 回覆、歷史全帳號爬取。
 - Chrome 操作沒有官方公布的安全頻率。`maximum_actions_per_run` 是本機停損，不是平台保證。
 - `TRUSTED_CHROME_HOST_RESOLVER` 已 source-wire 到固定版本的 Chrome browser client，只能 claim 已存在、URL 完全相符且 read-only 的 Chrome tab；caller 不能注入 agent／browser／tab／resolver，它也不能自行啟動 Chrome、導覽或從 JSON、設定值、fixture 安裝 authority。離線 source contract 已通過，但尚無已登入 FB／IG／Threads permalink canary，也尚未把 process-local host attestation 接成可升級 canonical obligation 的 production promotion receipt。因此它與 `STABLE_NODE_FRAME_MAPPING`、`THREE_PLATFORM_BROWSER_FIXTURE`、`THREE_PLATFORM_LIVE_DRAFT`、`LIVE_BATCH_CONFIRM`、`LIVE_BOUNDED_AUTO` 六項全部維持 open。以下 live 流程是 fail-closed 契約與未來操作規格，不代表已可在 production 自動送出。
@@ -41,8 +41,9 @@
 - `data/reply_events.jsonl`：草稿、核准、送出前標記、驗證與對帳事件；append-only。
 - `data/browser_scan_requests.jsonl`：使用者／當前 session 在掃描前指定的帳號、貼文與期限；append-only，Chrome receipt 不能自己改 scope。
 - 同一檔也追加 `browser_scan_completed`；保留留言數、零結果與展開證據，避免把「尚未掃描」誤判成「掃過但沒有留言」。
+- target-only intake 另追加 `browser_target_observation_completed`：只證明指定原生父留言已讀取，固定一則，`whole_post_complete=false`、`reply_thread_complete=false`，不能冒充整篇掃完或零回覆。其 exact scope 與 provenance digest 沿用至 draft／action。
 - `references/comment-policy.json`：通用分類與自動化停損；不得放帳號、Cookie、token 或私人留言。
-- 正式 policy 的 `live_browser_actuation_enabled=false` 是獨立 kill switch：safe preview、scan request、草稿與 action 可用，但所有 live Chrome receipt 寫入 canonical ledger 都停用。測試 fixture 必須顯式設成 `true`，使用者批准本身不能打開它。
+- 正式 policy 的 `live_browser_actuation_enabled=false` 關閉泛用 production 送出；只讀回填另受 `live_browser_scan_enabled` 控制。canary 必須先有已核准 action，再以 `browser_canary_lease_issued` 綁定當前 session、exact action／reply／scope、source digest、最長 300 秒及一次性上限；僅來源持有的候選入口可消耗。lease 不修改 policy、不能升級 capability，caller 不能用自製 preparation 繞過來源檢查。
 - `.rd/capability-ledger.json`：私版唯一 closed-world canonical authority，涵蓋產品核心與留言流程；只有這裡能升降狀態。receipt 與測試結果只能提供待驗證證據，不能自行改 ledger。
 - `comment-capabilities.json`：由 canonical ledger 選取留言 obligation 後生成的 non-authoritative public structural report，帶 canonical SHA-256 與 projection payload SHA-256；不得手改。只有能取得 private canonical parity 或受信任 attestation 的流程才能確認來源；public-only `--projection-only` 不能證明 verified 狀態、不能升級 capability，也不能打開 live mutation。
 
@@ -77,7 +78,7 @@ python scripts/comment_capability_gate.py --write-projection
 `--write-projection` 只重建公開 structural report，不會也不能升級 canonical 狀態；`--projection-only` 沒有 private canonical parity 時只可回報 non-authoritative structural validity。
 
 所有寫入 command 預設 dry-run；確認 JSON 正確才加 `--write`。
-目前 release 的 live Chrome mutation 預設停用；下列 `browser-scan／begin／finish／reconcile --write` 指令只有隔離 contract fixture 明示 opt-in 時可成功，不能視為已通過登入 Meta canary。
+目前 release 的泛用 live Chrome 送出預設停用；來源綁定的只讀回填與單則 IG canary 是分開的窄入口。下列分離式送出契約不代表 production 已啟用，也不能用隔離 fixture 的成功輸出宣稱通過登入 Meta canary。
 
 ## 1. 選定範圍
 
@@ -99,6 +100,8 @@ python scripts/comment_assistant.py browser-scan-request --platform instagram `
 ```
 
 scan request 由操作方先建立，Chrome 只能回綁；換帳號、換貼文、換 session 或逾時都要重建。
+
+若只處理一則已指定原生留言，使用來源持有的 `observeTargetComment(...)`，由它私下建立 `browser-target-observation-request`、雙讀同一目標並回填 `browser-target-observation`；不手填 live receipt。`document_binding` 是 tab／URL／完整作者與本文的 UI continuity，不是實體 epoch 或同 URL reload 保證；實際父貼文從可見 native anchor 取得。語言未辨識用 `und`，`has_own_reply=false` 不能作為可送出或不存在既有回覆的證明。
 
 ## 2. 讀取 Chrome 畫面
 
@@ -196,6 +199,10 @@ python scripts/comment_assistant.py revoke-grant --grant-id <grant-id> `
 ```
 
 ## 5. 逐則送出
+
+目前單則 IG 候選另走 `executeCanaryReply({ intentId, sessionId, leaseId })`：當前 session 明確授權範圍、canonical draft／approval 與短命 lease 缺一不可。先核對正數 native reply count、展開後雙讀及零 own reply；選取父留言後原生 `@author ` 前綴須保留在核准文字中，preflight 如實記錄 nonempty native mention 與來源 selection evidence。只可 durable claim 一次、submit 一次；正確父層恰新增一則 exact-own native child 才作正向確認。未看見、載入中、timeout、父層／文字不符一律 unknown／`needs_reconcile` 並停止，不推導 absence，不重新送出；lease 到期也不解除既有 attempt。完整欄位與限制只維護在 `chrome-comment-adapter.md`。
+
+以下為分離式 fixture／未來 production 契約，不是上述候選入口的替代呼叫方式：
 
 每一則都依序完成，不能先全點再補紀錄：
 

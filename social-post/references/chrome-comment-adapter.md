@@ -33,20 +33,23 @@ live Chrome read
 
 Python 不能直接 import Codex 的 Chrome 工具，因此 bridge 不是背景 daemon。使用者啟動 P5 後，由當前 Codex Node session 持有 Chrome tab 與 actuator，逐步交換 JSON。`comment_chrome_claim_bridge.mjs` 以 `spawn` 參數陣列和 stdin 呼叫本機 ledger CLI，`shell:false`，不碰 Cookie、profile 或 Meta API。
 
-掃描與送出有獨立開關：`live_browser_scan_enabled=true` 允許已核准 scope 的來源綁定掃描回填；`live_browser_actuation_enabled=false` 仍拒絕 live begin／finish／reconcile。正式 claim 失敗時 actuator 必須在 click 前停止。測試通過不等於三平台 live canary 通過，也不能因使用者核准某則回覆就跳過維護者開關。
+掃描與送出有獨立開關：`live_browser_scan_enabled=true` 允許已核准 scope 的來源綁定回填；`live_browser_actuation_enabled=false` 仍關閉泛用 production 送出。首次單則 IG 驗證另有 canonical canary lease：綁定當前 session、已核准 action、reply hash、exact scope 與 source digest，最長 300 秒、只可消耗一次；不修改 production policy 或 capability projection。claim 失敗必須在 click 前停止，測試通過或 lease 存在都不代表真實送出成功。
 
 ## 當前實作狀態（不是完成宣告）
 
 - `scanAndCommit(tab, target, locatorPlan, options)`：來源綁定的 Chrome 掃描與私有帳本回填；正式模式由受信任 host 取得證據，不接受 caller 自行捏造的 receipt。參數型態以 bridge 實作為準。
+- `observeTargetComment({ platform, account_key, post_key, post_permalink, platform_comment_id, comment_permalink, session_id, ttl_minutes? })`：候選 fused 只讀入口，目前來源 reader 僅支援 IG 原生父留言。先建立 target-only request，再於來源持有的 tab 雙讀完整作者／本文／原生 anchor，以私有 bearer 回填 canonical observation；不接收 caller 的 tab、body、author、receipt 或 resolver。
+- `executeCanaryReply({ intentId, sessionId, leaseId })`：限單則 IG 入口。只接受已核准 action 與有效 lease，重新核對正數回覆展開、零既有 own reply、原生父留言選擇及單行核准文字；durable claim 後最多點擊一次，再讀取正確父層的新 native child。無 lease、自訂 callback、source drift、過期或證據不足皆停止。2026-08-31 已完成一次真實單次送出；即時回讀不足時先記 `needs_reconcile`，之後經新 session 的唯讀 recovery 查證原生子回覆並結算 `sent`，全程未重送。這是單一案例，不是三平台／批次驗證。
 - `executeApprovedReply({ intentId, sessionId })`：新增候選 fused 路徑。只讀取本機已核准 action，私有 tab 驗證原留言、編輯器、完整本文與穩定節點，durable claim 後最多點擊一次，再由私有 bridge 提交結果。預設開關仍關閉。
-- `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 claim、不 submit。新的唯讀 `browser-recovery-action` 會核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。
+- `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 claim、不 submit。新的唯讀 `browser-recovery-action` 會核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。同程序 unknown 保留私有原 attempt 與輪替 capability；真正重啟後用不同 recovery session 接回，不能偽稱重啟。已消耗 canary 即使 lease 到期仍可唯讀結算，不會重新取得送出權。
 - Threads 已完成指定樣本的帳號、原貼文、原留言、零回覆狀態與編輯器只讀驗證；尚無本版真實送出／結果回讀 canary。不得宣稱 sent 或完整自動回覆已驗證。
 - FB 已辨識指定樣本的既有自己回覆及其 form；完整展開與 composer actor 尚未驗證，因此 `complete=false`。story／permalink query 解析保留並核對 `story_fbid`＋`id`，不能因未解析出留言就宣稱完整零結果。
-- IG 已在使用者指定樣本完成 native comment page 的 account／parent／whole-body／child-permalink／composer 只讀正反驗證。`p/reel/reels/tv` 僅在同 host、shortcode 與 query 時視為同貼文；原生留言 `/p/S/c/P/` 與子回覆 `/p/S/c/P/r/R/` 分別綁定層級。未展開的回覆不能當零；shared textarea 的 `@author` 自動帶入不能單獨證明選中了正確父留言。因此 IG 仍 `complete=false`，不能送出或推導 absence。
+- IG 已在使用者指定樣本完成 native comment page 的 account／parent／whole-body／child-permalink／composer 只讀正反驗證。`p/reel/reels/tv` 僅在同 host、shortcode 與 query 時視為同貼文；原生留言 `/p/S/c/P/` 與子回覆 `/p/S/c/P/r/R/` 分別綁定層級。未展開的回覆不能當零；shared textarea 的 `@author` 自動帶入不能單獨證明選中了正確父留言。泛用 surface 仍 `complete=false`；單則驗證只可走獨立 canary 入口，不能推導 absence 或整篇掃描完成。
+- native canary 先確認尚未選取的 editor 為空；點選指定父留言後，原生 `@author ` 前綴必須與核准 reply 完全相容並保留。preflight 如實記為 `composer_empty_before_fill=false`、`composer_initial_state=native_target_mention`，另綁來源持有的 selection evidence，不偽稱原生帶入後仍是空框。Chrome proxy 沒有可用的實體 document epoch；`document_binding.kind=source_owned_ui_continuity` 只綁來源 tab、exact URL、帳號與完整作者／本文摘要，不保證同 URL reload 偵測，也不升級完整 lifecycle／absence authority。
 - IG Reel 畫面可能同時顯示 Facebook 留言數；分平台只認該平台原生留言 anchor，不以合併總數或已載入 viewport 當完整掃描。不同語言依原文草擬；索取集數、語言版或連結都需人工確認，不自動承諾未存在的內容。
 - 不用未指定貼文、動態牆、私訊或整頁私人截圖補齊缺證據。缺少指定樣本或公開測試授權時停止 live 驗證，報告具體缺口；不要重跑同一批 tests 當成進度。
 
-以下分離式 `prepareReply`／`submitOnce` 舊介面仍是 fixture／未來契約；不得把它與上方候選 fused 入口混為一談。候選入口必須經授權 canary 與完整回覆展開驗證才能升級公開 capability projection。
+以下分離式 `prepareReply`／`submitOnce` 舊介面仍是 fixture／未來契約；不得把它與上方候選 fused 入口混為一談。canary 的正向確認只認原有 native reply rows 未變，且正確父留言下恰新增一則核准文字的 own-account child；timeout、看不到新 child、內容／層級不符皆保留 unknown／`needs_reconcile`，停止且不再 click。候選入口與單則結果都不能自行升級公開 capability projection。
 
 ## 可執行 actuator
 
@@ -86,7 +89,7 @@ nonce 只留在 Node 記憶體，並以 `spawn(argv, {shell:false})` 透過 stdi
 不要把 capability、nonce 或完整 provenance envelope 寫到檔案、文件、console 或
 canonical ledger。
 
-正式 live 介面只有五個：
+以下五個是分離式 fixture／未來 production 契約，不包含上方獨立候選 fused 入口：
 
 - `scanPost(tab, scanRequest, scanPlan, options)`：從 live DOM 產生 authenticated scan receipt；目前 live registry 沒有可用 plan，因此正式路徑 fail closed。
 - `prepareReply(tab, action, locatorPlan, options)`：未來 live 契約會核對 context、空 composer、填入 immutable reply 並讀回；目前只有 loopback `testOnly:true` fixture 可執行，live 在任何 DOM mutation 前 fail closed。
@@ -101,7 +104,7 @@ canonical ledger。
 surface；自訂 runner、root 或 scriptPath 的 bridge 也不能使用 fused live commit。目前正式
 policy 仍 default-off，production adapter 尚未有 authenticated canary，因此正式路徑維持
 fail closed。actuator 不分類風險、不產生回覆、不建立 permit，也不能把不確定結果改成 sent；
-只有兩個 fused method 能把它剛取得的 fresh evidence 送交 ledger 分類。
+候選 fused 入口只提交自己剛取得的 fresh evidence，不向 caller 開放 raw receipt commit。
 
 ## 連線與 tab
 
@@ -134,6 +137,8 @@ fail closed。actuator 不分類風險、不產生回覆、不建立 permit，�
 adapter 版本只是受控 DOM contract，不代表 Meta UI 永遠不變。fixture registry 與 production registry 位於不同模組，fixture 的 `[data-fb-*]／[data-ig-*]／[data-threads-*]` selector 永遠不能提升為 live。**目前三平台 production registry 均為 `unavailable_pending_authenticated_canary_and_live_locator_revision`**；read-only contract probe 的存在不會改變這個狀態。每次取得真實 selector 或更新 UI revision都要換版本，重跑 host negatives、exhaustion regression、三平台 fixture 與已登入 read-only canary；完成前維持 `live_browser_actuation_enabled=false`。
 
 ## 1. Browser scan
+
+指定留言不必假裝已掃完整篇：`observeTargetComment` 的私有 bridge 依序執行 `browser-target-observation-request` 與 `browser-target-observation`。request／action 明示 `observation_scope=target_comment` 與 exact native ID／permalink，bearer binding 同樣包含這份 scope；完成事件是 `browser_target_observation_completed`，固定一則且 `whole_post_complete=false`、`reply_thread_complete=false`，沒有 `zero_result`。provenance 只證明 target receipt continuity；`has_own_reply=false` 是未觀測到，不是 absence proof。原文語言未知用 `und`，草擬時再依完整原文判斷。以下整篇 scan 契約不得拿來替代或放大這份 target-only 證據。
 
 先由 ledger 建立 request，Chrome 不得從當前頁面反向決定 scope：
 
@@ -271,7 +276,7 @@ trusted-host integration 完成後，`prepareReply()` 才會先確認 composer �
 }
 ```
 
-preflight 預設 60 秒失效，而且時間必須在 approval 之後、permit 到期之前。actuator 會重算 reply hash、action digest、plan digest 與 preparation ID；ledger 會再重算 action digest／preparation ID並要求 exact-own baseline 為 0。任何 flag 不是 boolean `true`，或綁定值不一致都拒絕。
+preflight 預設 60 秒失效，而且時間必須在 approval 之後、permit 到期之前。actuator 會重算 reply hash、action digest、plan digest 與 preparation ID；ledger 會再重算 action digest／preparation ID並要求 exact-own baseline 為 0。泛用契約任何 flag 不是 boolean `true`，或綁定值不一致都拒絕。唯一獨立候選例外是有效 IG canary 的原生 mention editor：`composer_initial_state`、`composer_initial_text`、`selected_parent_evidence`、`selected_parent_evidence_digest` 四欄皆須納入 preparation digest，不能把 nonempty editor flag 改成 `true`。
 
 ```powershell
 python scripts/comment_assistant.py browser-begin <preflight.json> `

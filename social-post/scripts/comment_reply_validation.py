@@ -17,6 +17,7 @@ from comment_browser_provenance import (
     validate_consumption_shape,
 )
 from comment_browser_common import DIGEST_PATTERN
+from comment_canary import CANARY_ATTEMPT_FIELDS, CANARY_EVENT, validate_canary_lease_shape
 from comment_identity import reply_hash
 from comment_scan_provenance import (
     ACTION_PROVENANCE_DIGEST_FIELD,
@@ -30,7 +31,7 @@ RISK_LEVELS = {"low", "medium", "high"}
 REPLY_EVENT_TYPES = {
     "drafted", "approved", "send_started", "sent_verified", "needs_reconcile",
     "reconciled_sent", "reconciled_not_sent", "browser_reinspection_observed",
-    "reconcile_recovery_issued", "failed", "deferred", "skipped", "revoked",
+    "reconcile_recovery_issued", "failed", "deferred", "skipped", "revoked", CANARY_EVENT,
 }
 EVENT_TYPES = REPLY_EVENT_TYPES | GRANT_EVENT_TYPES
 
@@ -176,6 +177,11 @@ def validate_reply_event_shape(
     row: dict[str, Any], label: str, errors: list[str],
 ) -> None:
     event_type = row.get("event_type")
+    if any(key in row for key in CANARY_ATTEMPT_FIELDS):
+        if event_type != "send_started" or not all(row.get(key) for key in CANARY_ATTEMPT_FIELDS):
+            errors.append(f"{label} canary consumption belongs only to a complete send_started binding")
+    if "canary_lease" in row and event_type != CANARY_EVENT:
+        errors.append(f"{label} canary lease belongs only to its authorization event")
     require_non_empty_strings(row, ("audit_id", "event_type", "occurred_at"), label, errors)
     if event_type not in GRANT_EVENT_TYPES:
         require_non_empty_strings(row, ("intent_id", "comment_key"), label, errors)
@@ -189,6 +195,12 @@ def validate_reply_event_shape(
         validate_grant_shape(row, str(event_type), label, errors)
     elif event_type == "drafted":
         _validate_draft_shape(row, label, errors)
+    elif event_type == CANARY_EVENT:
+        require_non_empty_strings(row, ("session_id",), label, errors)
+        try:
+            validate_canary_lease_shape(row.get("canary_lease"))
+        except (ValueError, TypeError) as exc:
+            errors.append(f"{label} {exc}")
     elif event_type == "approved":
         validate_approval_shape(row, label, errors)
     else:

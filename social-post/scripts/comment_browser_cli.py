@@ -19,6 +19,9 @@ from comment_browser_provenance import (
     issue_reconcile_receipt_capability, reconcile_receipt_binding_from_issuer,
 )
 from comment_browser_send_contract import build_browser_recovery_action
+from comment_canary import canary_settlement_allowed, require_canary_lease
+from comment_canary_cli import register_canary_commands
+from comment_browser_target_cli import register_target_observation_commands
 from comment_cli_support import (
     SKILL_ROOT, commit_or_preview, load_state, now_iso, read_json_source, require_valid,
 )
@@ -34,16 +37,26 @@ from comment_scan_provenance import (
 
 def _require_live_browser_mutation_enabled(
     policy: dict[str, Any], args: argparse.Namespace, operation: str,
+    *, state: dict[str, Any] | None = None, action: dict[str, Any] | None = None,
 ) -> None:
     """Fail closed before a live Chrome receipt can mutate the canonical ledger."""
     scan_only_enabled = (
         operation == "browser-scan"
         and policy.get("live_browser_scan_enabled") is True
     )
+    canary_enabled = False
+    if operation == "browser-begin" and getattr(args, "canary_lease_id", None):
+        if state is None or action is None:
+            raise ValueError("canary begin requires the canonical approved action")
+        require_canary_lease(state, args.canary_lease_id, args.intent_id, args.session_id, action=action)
+        canary_enabled = True
+    elif operation in {"browser-finish", "browser-reconcile", "browser-recover-reconcile"} and state is not None:
+        canary_enabled = canary_settlement_allowed(state)
     if (
         args.write
         and policy.get("live_browser_actuation_enabled") is not True
         and not scan_only_enabled
+        and not canary_enabled
     ):
         raise ValueError(
             f"{operation} live browser ledger mutation is disabled by policy"
@@ -173,6 +186,9 @@ def command_browser_action(args: argparse.Namespace) -> None:
         result["latest_comments"], result["reply_states"],
         args.intent_id, args.session_id,
     )
+    if getattr(args, "canary_lease_id", None):
+        _key, state = _active_intent(result["reply_states"], args.intent_id)
+        require_canary_lease(state, args.canary_lease_id, args.intent_id, args.session_id, action=action)
     print(json.dumps(action, ensure_ascii=False, indent=2))
 
 
@@ -191,10 +207,13 @@ def command_browser_begin(args: argparse.Namespace) -> None:
     raw = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
-    _require_live_browser_mutation_enabled(policy, args, "browser-begin")
+    _key, initial_state = _active_intent(result["reply_states"], args.intent_id)
+    action = build_browser_action(result["latest_comments"], result["reply_states"], args.intent_id, args.session_id)
+    _require_live_browser_mutation_enabled(policy, args, "browser-begin", state=initial_state, action=action)
     preflight = validate_browser_preflight(
         raw, result["latest_comments"], result["reply_states"], policy,
         args.intent_id, args.session_id,
+        canary_lease_id=getattr(args, "canary_lease_id", None),
     )
     state = preflight["state"]
     comment = preflight["comment"]
@@ -241,6 +260,12 @@ def command_browser_begin(args: argparse.Namespace) -> None:
         DRAFT_PROVENANCE_DIGEST_FIELD: preflight[DRAFT_PROVENANCE_DIGEST_FIELD],
         ACTION_PROVENANCE_DIGEST_FIELD: preflight[ACTION_PROVENANCE_DIGEST_FIELD],
     }
+    if getattr(args, "canary_lease_id", None):
+        lease = require_canary_lease(state, args.canary_lease_id, args.intent_id, args.session_id, action=action)
+        event_payload.update(browser_canary_lease_id=lease["lease_id"], browser_canary_lease_digest=lease["lease_digest"])
+    for key in ("composer_initial_state", "composer_initial_text", "selected_parent_evidence", "selected_parent_evidence_digest"):
+        if key in preflight:
+            event_payload[f"browser_{key}"] = preflight[key]
     finish_binding = build_receipt_binding("browser-finish", event_payload)
     finish_capability, capability_metadata = issue_receipt_capability(
         "browser-finish", finish_binding, occurred_at,
@@ -340,10 +365,10 @@ def command_browser_recover_reconcile(args: argparse.Namespace) -> None:
     """Rotate lost/expired receipt authority without creating another send claim."""
     records, policy, result = load_state(args.root)
     require_valid(result)
-    _require_live_browser_mutation_enabled(
-        policy, args, "browser-recover-reconcile",
-    )
     comment_key, state = _active_intent(result["reply_states"], args.intent_id)
+    _require_live_browser_mutation_enabled(
+        policy, args, "browser-recover-reconcile", state=state,
+    )
     if state.get("status") not in {"send_started", "needs_reconcile"}:
         raise ValueError(
             "browser-recover-reconcile requires an authoritative uncertain send, "
@@ -388,8 +413,8 @@ def command_browser_finish(args: argparse.Namespace) -> None:
     envelope = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
-    _require_live_browser_mutation_enabled(policy, args, "browser-finish")
     comment_key, state = _active_intent(result["reply_states"], args.intent_id)
+    _require_live_browser_mutation_enabled(policy, args, "browser-finish", state=state)
     attempt = state.get("attempt") or {}
     if args.session_id != attempt.get("session_id"):
         raise ValueError("browser-finish session differs from receipt capability session")
@@ -429,8 +454,8 @@ def command_browser_reconcile(args: argparse.Namespace) -> None:
     envelope = read_json_source(args.source)
     records, policy, result = load_state(args.root)
     require_valid(result)
-    _require_live_browser_mutation_enabled(policy, args, "browser-reconcile")
     comment_key, state = _active_intent(result["reply_states"], args.intent_id)
+    _require_live_browser_mutation_enabled(policy, args, "browser-reconcile", state=state)
     attempt = state.get("attempt") or {}
     issuer = state.get("reconcile_capability") or state.get("last_event") or {}
     binding = reconcile_receipt_binding_from_issuer(
@@ -491,6 +516,8 @@ def _add_root(parser: argparse.ArgumentParser, *, write: bool) -> None:
 
 
 def register_browser_commands(sub: argparse._SubParsersAction) -> None:
+    register_canary_commands(sub)
+    register_target_observation_commands(sub)
     request = sub.add_parser("browser-scan-request")
     request.add_argument("--platform", required=True, choices=("facebook", "instagram", "threads"))
     request.add_argument("--account-key", required=True)
@@ -512,6 +539,7 @@ def register_browser_commands(sub: argparse._SubParsersAction) -> None:
     action = sub.add_parser("browser-action")
     action.add_argument("--intent-id", required=True)
     action.add_argument("--session-id", required=True)
+    action.add_argument("--canary-lease-id")
     _add_root(action, write=False)
     action.set_defaults(handler=command_browser_action)
 
@@ -525,6 +553,7 @@ def register_browser_commands(sub: argparse._SubParsersAction) -> None:
     begin.add_argument("source", help="fresh structured Chrome preflight JSON file or -")
     begin.add_argument("--intent-id", required=True)
     begin.add_argument("--session-id", required=True)
+    begin.add_argument("--canary-lease-id")
     _add_root(begin, write=True)
     begin.set_defaults(handler=command_browser_begin)
 

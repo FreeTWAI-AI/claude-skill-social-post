@@ -4,15 +4,22 @@
 
 目前穩定標籤：**v2.5.0**；`main` 已同步 **Unreleased candidate**。
 
-Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime revision／雜湊、架構自校準與單次送出／異常恢復的回歸測試。這些是本機 contract 與 localhost test-only 證據，不代表三平台 live Meta 回覆已解鎖。
+Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime revision／雜湊、架構自校準與單次送出／異常恢復的回歸測試。另已完成一次 IG 真實單次送出、原生子回覆查證與唯讀 recovery 對帳；這些證據不代表三平台 live Meta 回覆已解鎖。
 
 > `main` 已分開掃描與送出開關：受控、指定 scope 的來源綁定掃描可用；`live_browser_actuation_enabled` 仍預設為 `false`。真實送出／結果回讀未完成三平台 canary，不能宣稱全面自動回覆已完成。
 
+本候選版尚未通過嚴格完成檢查：Cleanup 仍有 12 項過長文件／模組／函式的 `REVIEW`，且跨語言、私版 Git 與更新來源覆蓋保留 `NOT_CHECKED`。發布候選程式不等於解除這些項目；穩定標籤仍為 v2.5.0，沒有新建正式 Release 或升級 production capability。
+
 ## Unreleased on main
 
+- 新增 `observeTargetComment`：只回填一則指定原生留言，保留完整作者／本文與來源憑證，不冒充整篇掃描完成。
+- 新增獨立的單則 IG `executeCanaryReply` 候選入口：只能使用已核准 action、最長 300 秒且限一次的來源綁定 lease；正式送出開關維持關閉，不因 canary 自動升級三平台能力。
+- 一次真實 IG 執行已驗證「單次送出 → 即時回讀不足而停止 → 新 session 唯讀 recovery → 原帳本確認 sent」，沒有重送；真實本文、帳號與回覆連結只保留在私人帳本。
+- 修正原生 textarea 以目前 `value` 綁定節點，並在刻意選擇父留言後綁定選中的編輯器；填字與後續 claim 前的穩定節點檢查仍嚴格保留。
+- IG 原生回覆保留平台自動產生的 `@mention`，先確認完整回覆串與零自己回覆；以實際頁面連續核對處理巢狀展開與延後載入，不假造瀏覽器未提供的 document epoch。未知結果停止並進入唯讀對帳。
 - 新增 default-only `executeApprovedReply` 候選入口與 read-only recovery，拒絕 caller tab／action／selector／callback；原核准文字、帳號、貼文、留言及原 attempt 都必須一致。
 - 更新 Codex Chrome runtime 固定版本至 `26.825.51511`，保留 bytes／SHA-256 驗證。
-- Threads 的指定樣本已核對原留言、完整本文、帳號、零回覆與回覆視窗；未實際送出。FB 已辨識既有自己回覆；IG 新增原生留言頁的帳號、完整本文、父子留言與編輯器只讀驗證，錯帳號／作者／截短本文均拒絕。FB／IG 完整展開與編輯器選定父層尚未驗證，仍禁止送出。
+- Threads 的指定樣本已核對原留言、完整本文、帳號、零回覆與回覆視窗；未實際送出。FB 已辨識既有自己回覆，但完整展開與編輯器選定父層尚未驗證。IG 新增原生留言頁的帳號、完整本文、父子留言、正數回覆展開及原生 mention 編輯器驗證，錯帳號／作者／截短本文均拒絕；真實送出仍限獨立 canary，不代表泛用路徑已開放。
 - 修正 Facebook story query 身分保留與完整度判定；支援 Instagram 同一 shortcode 的 `p/reel/reels/tv` 網址及 `/p/S/c/P` 留言，拒絕跨貼文、重複或矛盾識別欄位。IG 內顯示的 Facebook 留言數不得混入 IG 掃描。
 - 公開版本只含通用程式與匿名測試。真實留言、草稿、帳號洞察、原文、照片與私人憑證不在發布範圍內。
 
@@ -83,7 +90,7 @@ Copy-Item content_plan.example.md content_plan.md
 
 ## Comment Ops 快速開始
 
-P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供 24/7 背景監聽或無邊界全自動模式。`main` 的受控掃描與送出採獨立政策；核准回覆不會繞過 default-off 送出開關。實際 Chrome 操作需要 `chrome:control-chrome`、使用者既有登入狀態與來源綁定 adapter。候選送出／唯讀恢復入口的存在不代表已通過真實 canary。
+P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供 24/7 背景監聽或無邊界全自動模式。`main` 的受控掃描與送出採獨立政策；核准回覆不會繞過 default-off 送出開關。實際 Chrome 操作需要 `chrome:control-chrome`、使用者既有登入狀態與來源綁定 adapter。已驗證的單則 IG canary 不代表其他留言、平台或批次路徑已驗證。
 
 Codex 與 Claude Code 都能使用 P0–P4、P5 的離線草稿／政策／ledger／測試功能。現有 existing-session Chrome runtime 則固定依賴 Codex bundled Chrome revision；Claude Code 或獨立公開 clone 找不到精確 runtime 時會 fail closed，不會改走未審核的瀏覽器路徑，也不代表 Claude 安裝已具備 live Meta 控制能力。
 

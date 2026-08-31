@@ -36,6 +36,8 @@ const before = await observedDigests();
 const actor = createCommentChromeActuator();
 assert.equal(Object.isFrozen(actor), true);
 assert.equal(typeof actor.executeApprovedReply, "function");
+assert.equal(typeof actor.executeCanaryReply, "function");
+assert.equal(typeof actor.observeTargetComment, "function");
 const inertRequest = Object.freeze({
   intentId: "rejection-only-no-approved-intent",
   sessionId: "rejection-only-no-browser-session",
@@ -64,7 +66,26 @@ for (const options of [{ testOnly: true }, { root: "unused" }, { claimSubmit: nu
     customActor.executeApprovedReply(inertRequest),
     /rejects custom actuator options and callbacks/u,
   );
+  for (const method of ["executeCanaryReply", "observeTargetComment"]) {
+    await assert.rejects(customActor[method]({}), /rejects custom actuator options and callbacks/u);
+  }
 }
+
+for (const request of [undefined, null, [], {},
+  { ...inertRequest, leaseId: "lease", tab: {} },
+  { ...inertRequest, leaseId: "lease", action: {} },
+  { ...inertRequest, leaseId: "lease", approval: true },
+  { ...inertRequest, leaseId: "" },
+]) {
+  await assert.rejects(actor.executeCanaryReply(request),
+    /only JSON-compatible values|accepts only intentId, sessionId and leaseId|must be a non-empty string/u);
+}
+for (const request of [null, [], { tab: {} }, { reply_text: "not target identity" }]) {
+  await assert.rejects(actor.observeTargetComment(request),
+    /only JSON-compatible values|target observation accepts only/u);
+}
+await assert.rejects(actor.executeCanaryReply({ ...inertRequest, leaseId: "nonexistent-lease" }),
+  /approved action read failed/u);
 
 // The disabled-policy error must happen before a nonexistent intent is read
 // from the ledger or the unavailable standalone-Node browser runtime is used.

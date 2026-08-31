@@ -70,6 +70,10 @@ const claimSubmit = createPythonLedgerClaimSubmit({
 assert.equal(isPythonLedgerClaimSubmit(claimSubmit), false);
 assert.equal(isPythonLedgerClaimSubmit(async () => ({})), false);
 const liveClaimSubmit = createPythonLedgerClaimSubmit({ preparation });
+assert.throws(() => createPythonLedgerClaimSubmit({ preparation, canaryLeaseId: "forged-or-stolen-lease" }),
+  /public claim bridge cannot accept a canary lease string/u);
+assert.throws(() => createPythonLedgerClaimSubmit({ preparation, canaryContext: { leaseId: "forged" } }),
+  /source-owned execution context/u);
 assert.equal(isPythonLedgerClaimSubmit(liveClaimSubmit), true);
 assert.equal(Object.isFrozen(liveClaimSubmit), true);
 assert.equal(liveClaimSubmit.finishReceipt, undefined);
@@ -127,6 +131,8 @@ for (const [method, extra] of [
   ["recoverApprovedReply", { preparation: {} }],
   ["recoverApprovedReply", { root: "another-ledger" }],
   ["reconcileUncertainReply", { receipt: {} }],
+  ["reconcileUncertainReply", { canary_lease_id: "0".repeat(32), canary_lease_digest: digest("a") }],
+  ["reconcileUncertainReply", { context: { attempt: { canary_lease_id: "0".repeat(32) } } }],
 ]) {
   await assert.rejects(
     () => defaultRecoveryActor[method]({ intentId: "uncertain-intent", sessionId: "fresh-session", ...extra }),
@@ -146,6 +152,74 @@ await assert.rejects(
   /private active recovery context/u,
 );
 const bridgeSource = await readFile(new URL("./comment_chrome_claim_bridge.mjs", import.meta.url), "utf8");
+// Empty editor A may acquire a new observed node_id after the source-owned
+// reply trigger. Selected editor B must remain pinned across fill and claim.
+// This guards source ordering, not physical DOM continuity or a live canary.
+const canaryPrepareStart = bridgeSource.indexOf("async function prepareLiveCanaryReply(");
+const canaryPrepareEnd = bridgeSource.indexOf("async function prepareLiveReply(", canaryPrepareStart);
+assert.ok(canaryPrepareStart > 0 && canaryPrepareEnd > canaryPrepareStart);
+const canaryPrepareSource = bridgeSource.slice(canaryPrepareStart, canaryPrepareEnd);
+assert.match(canaryPrepareSource, /^\s*await bindLiveSubmitNode\(tab, initialComposer\);\s*$/mu);
+assert.doesNotMatch(canaryPrepareSource, /=\s*await bindLiveSubmitNode\(tab, initialComposer\)/u);
+assert.doesNotMatch(canaryPrepareSource, /canary composer changed during selection/u);
+let previousCanaryMarker = -1;
+for (const marker of [
+  'if (await readExactLiveComposer(initialComposer) !== "")',
+  "await bindLiveSubmitNode(tab, initialComposer);",
+  'if (await readExactLiveComposer(surface.composer) !== "")',
+  'await unique(surface.trigger, "canary exact parent reply trigger", { enabled: true })',
+  "await trigger.click({ timeoutMs: 5000 });",
+  "digestObject(selected.replyExhaustionCandidate.document_binding)",
+  'fail("canary native target UI changed while selecting the parent")',
+  "if (await readExactLiveComposer(composer) !== prefix || !action.reply_text.startsWith(prefix))",
+  'fail("canary native mention or approved text differs from the selected parent")',
+  "const composerNodeId = await bindLiveSubmitNode(tab, composer);",
+  "composer_node_id: composerNodeId, initial_text: prefix",
+  "liveCanarySelections.set(tab, selection);",
+  "await composer.fill(action.reply_text, { timeoutMs: 5000 });",
+  "const ready = await inspectReadyLiveComposer(tab, action, canary);",
+]) {
+  const position = canaryPrepareSource.indexOf(marker);
+  assert.ok(position > previousCanaryMarker, `canary transition guard is missing or reordered: ${marker}`);
+  previousCanaryMarker = position;
+}
+assert.equal((canaryPrepareSource.match(/liveCanarySelections\.set\(/gu) ?? []).length, 1);
+const canaryReadyStart = bridgeSource.indexOf("async function inspectReadyLiveComposer(");
+assert.ok(canaryReadyStart > 0 && canaryReadyStart < canaryPrepareStart);
+const canaryReadySource = bridgeSource.slice(canaryReadyStart, canaryPrepareStart);
+assert.match(canaryReadySource, /\(await readExactLiveComposer\(composer\)\) !== action\.reply_text/u);
+assert.match(canaryReadySource, /await bindLiveSubmitNode\(tab, composer\) !== selected\.composer_node_id/u);
+assert.match(canaryReadySource, /fail\("canary composer lost its source-owned parent selection"\)/u);
+assert.doesNotMatch(canaryReadySource, /liveCanarySelections\.set\(/u);
+const canarySubmitStart = bridgeSource.indexOf("async function submitLiveReplyAndFinish(");
+const canarySubmitEnd = bridgeSource.indexOf("\nasync function ", canarySubmitStart + 1);
+assert.ok(canarySubmitStart > 0 && canarySubmitEnd > canarySubmitStart);
+const canarySubmitSource = bridgeSource.slice(canarySubmitStart, canarySubmitEnd);
+assert.match(canarySubmitSource, /let authorization = await requireLiveReplyPolicy\(canary\)/u);
+let previousClaimMarker = -1;
+for (const marker of [
+  "const before = await inspectReadyLiveComposer(tab, action, canary);",
+  "const nodeId = await bindLiveSubmitNode(tab, before.submit);",
+  "await claimSubmit(request)",
+  "const afterClaim = await inspectReadyLiveComposer(tab, action, canary);",
+  "await bindLiveSubmitNode(tab, afterClaim.submit) !== nodeId",
+  "\n    authorization = await requireLiveReplyPolicy(canary);",
+  "await tab.dom_cua.click({ node_id: nodeId });",
+  'await commitPythonLedgerBrowserReceipt(claimSubmit, "browser-finish", receipt)',
+  "if (commit.reconcile_required)",
+  "claim_id: decision.claim_id, preflight_id: decision.preflight_id",
+  "canary_lease_id: authorization.lease_id",
+  "canary_lease_digest: authorization.lease_digest",
+  "const context = Object.freeze({ action, preparation, attempt, claimSubmit });",
+  "liveReplyRecoveryContexts.set(JSON.stringify([action.intent_id, action.session_id]), context);",
+]) {
+  const position = canarySubmitSource.indexOf(marker);
+  assert.ok(position > previousClaimMarker, `canary claim guard is missing or reordered: ${marker}`);
+  previousClaimMarker = position;
+}
+assert.equal((canarySubmitSource.match(/liveReplyRecoveryContexts\.set\(/gu) ?? []).length, 1);
+assert.equal((canarySubmitSource.match(/await claimSubmit\(request\)/gu) ?? []).length, 1);
+assert.equal((canarySubmitSource.match(/await tab\.dom_cua\.click\(/gu) ?? []).length, 1);
 const recoverySourceStart = bridgeSource.indexOf("async function readLiveRecoveryAction(");
 const recoverySourceEnd = bridgeSource.indexOf("export function isPythonLedgerClaimSubmit(", recoverySourceStart);
 assert.ok(recoverySourceStart > 0 && recoverySourceEnd > recoverySourceStart);
@@ -153,7 +227,7 @@ const liveRecoverySource = bridgeSource.slice(recoverySourceStart, recoverySourc
 assert.match(liveRecoverySource, /DEFAULT_SCRIPT, "browser-recovery-action"/u);
 assert.match(liveRecoverySource, /shell: false, windowsHide: true/u);
 assert.match(liveRecoverySource, /preparation\.action_digest !== actionDigest\(action\)/u);
-assert.match(liveRecoverySource, /loadSetupBrowserRuntime\(\)/u);
+assert.match(liveRecoverySource, /getSourceOwnedChromeBrowser\(\)/u);
 assert.match(liveRecoverySource, /recoverPythonLedgerReconcile\(claimSubmit, request\)/u);
 assert.match(liveRecoverySource, /context\.claimSubmit, "browser-reconcile", receipt/u);
 assert.match(liveRecoverySource, /liveReplyRecoveryContexts\.set\(request\.key, context\)/u);
@@ -163,6 +237,13 @@ assert.doesNotMatch(liveRecoverySource, /\b(?:claimRequest|validateWriteDecision
 assert.doesNotMatch(liveRecoverySource, /\bclaimSubmit\s*\(/u);
 assert.doesNotMatch(liveRecoverySource, /inspectLiveReplySurface\([^\n]*"before"/u);
 assert.doesNotMatch(liveRecoverySource, /requireCurrentReplyPermit\(/u);
+assert.match(liveRecoverySource, /recovery canary attempt has no complete canonical lease binding/u);
+const continuationStart = liveRecoverySource.indexOf("async function reconcileLiveUncertainReply(");
+const continuationSource = liveRecoverySource.slice(continuationStart);
+assert.match(continuationSource, /const context = liveReplyRecoveryContexts\.get\(request\.key\)/u);
+assert.match(continuationSource, /if \(!context\.attempt\.canary_lease_id\) await requireLiveReplyPolicy\(\);/u);
+assert.doesNotMatch(continuationSource, /^\s*await requireLiveReplyPolicy\(\);/mu);
+assert.doesNotMatch(continuationSource, /checkLiveCanaryLease|requireCurrentReplyPermit|claimSubmit\(/u);
 const forgedRecovery = Object.freeze({
   schema_version: 1, decision: "RECONCILE_ONLY", operation: "browser-reconcile",
   intent_id: preparation.intent_id, action_id: preparation.action_id,

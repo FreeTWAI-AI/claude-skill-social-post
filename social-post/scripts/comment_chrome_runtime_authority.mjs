@@ -30,6 +30,7 @@ export const CHROME_BROWSER_CLIENT_BYTES = 149210;
 
 const EXISTING_CHROME_READ_SESSIONS = new WeakSet();
 const READ_SESSION_INTERNAL = new WeakMap();
+let sourceOwnedChromePromise;
 const META_POST_PATH_RULES = Object.freeze({
   facebook: /(?:\/posts\/|\/videos\/|^\/reel\/|^\/watch\/|^\/(?:permalink|story)\.php$|^\/photo\/)/u,
   instagram: /^\/(?:[A-Za-z0-9._]+\/)?(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+$/u,
@@ -83,6 +84,24 @@ export async function loadSetupBrowserRuntime() {
   }
 }
 
+/** One selection per persistent runtime; tab cleanup does not reconnect Chrome. */
+export async function getSourceOwnedChromeBrowser() {
+  if (!sourceOwnedChromePromise) {
+    sourceOwnedChromePromise = (async () => {
+      const setupBrowserRuntime = await loadSetupBrowserRuntime();
+      const agent = requireBrowserSurface(await setupBrowserRuntime());
+      const browser = await agent.browsers.get("chrome");
+      if (!browser?.tabs || typeof browser.tabs.new !== "function") {
+        fail("trusted Chrome session cannot create a bounded tab");
+      }
+      return browser;
+    })();
+  }
+  // A rejected selection stays rejected: callers cannot silently reset a
+  // browser connection to evade an uncertain send or lose its reservations.
+  return sourceOwnedChromePromise;
+}
+
 function canonicalString(raw) {
   return canonicalUrl(raw).toString();
 }
@@ -133,9 +152,7 @@ export async function captureChromeAccessibleSnapshotPair(rawTarget, options = {
   if (!Number.isInteger(settleMs) || settleMs < 0 || settleMs > 10000) {
     fail("Chrome snapshot settleMs must be an integer from 0 to 10000");
   }
-  const setupBrowserRuntime = await loadSetupBrowserRuntime();
-  const agent = requireBrowserSurface(await setupBrowserRuntime());
-  const browser = await agent.browsers.get("chrome");
+  const browser = await getSourceOwnedChromeBrowser();
   if (!browser?.tabs || typeof browser.tabs.new !== "function") {
     fail("trusted Chrome session cannot create a bounded scan tab");
   }
@@ -430,9 +447,7 @@ export async function openExistingChromeReadSession(rawTarget) {
   // setupBrowserRuntime itself requires the ambient trusted Node REPL browser
   // service. No setup option, runtime object, transport, or path is accepted
   // from the caller.
-  const setupBrowserRuntime = await loadSetupBrowserRuntime();
-  const agent = requireBrowserSurface(await setupBrowserRuntime());
-  const browser = requireExistingChromeSurface(await agent.browsers.get("chrome"));
+  const browser = requireExistingChromeSurface(await getSourceOwnedChromeBrowser());
   const freshListing = await browser.user.openTabs();
   const listedTab = exactFreshListingEntry(freshListing, expectedUrl);
   // Pass the exact object from this fresh listing, never a caller-provided or

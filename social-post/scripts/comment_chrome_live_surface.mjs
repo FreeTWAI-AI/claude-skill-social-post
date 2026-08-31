@@ -1,9 +1,18 @@
 /** Source-owned, read-only Meta reply inspection. No network or submit actions. */
-import { canonicalUrl, fail, instagramUrlIdentity, LIVE_HOSTS, requiredString, unique } from "./comment_chrome_common.mjs";
+import {
+  canonicalUrl, digestObject, fail, immutableJsonSnapshot, instagramUrlIdentity,
+  LIVE_HOSTS, requiredString, unique,
+} from "./comment_chrome_common.mjs";
 import { assertAction, bindObservedSubmitNode } from "./comment_chrome_send_support.mjs";
 
-export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.2";
+export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.3";
 const inspectionBrowsers = new WeakMap();
+const instagramReplyEvidence = new WeakMap();
+const instagramExpansionAttempts = new WeakMap();
+const instagramReadGenerations = new WeakMap();
+const instagramPreparations = new WeakSet();
+const instagramTabIds = new WeakMap();
+const MAX_INSTAGRAM_ONE_PAGE_REPLIES = 100;
 
 /** Called only with the source-owned runtime browser by the fused bridge. */
 export function bindLiveReplyBrowser(tab, browser) {
@@ -266,12 +275,109 @@ async function inspectFacebook(tab, action, phase) {
   return { ...base, composer, submit: form.getByRole("button", { name: "貼文留言", exact: true }) };
 }
 
+function recordInstagramReplyEvidence(tab, action, observedUrl, target, evidence) {
+  const binding = digestObject({ action, observedUrl }, "Instagram reply evidence binding");
+  const documentBinding = evidence.documentBinding;
+  const documentKey = digestObject(documentBinding, "Instagram native UI binding");
+  let state = instagramReplyEvidence.get(tab);
+  if (!state || state.binding !== binding || state.documentKey !== documentKey) {
+    state = { binding, documentBinding, documentKey, declaredCount: null,
+      expandAttempted: instagramExpansionAttempts.get(tab)?.has(binding) ?? false,
+      invalidated: false, stableReads: 0, terminalFingerprint: null };
+    instagramReplyEvidence.set(tab, state);
+  }
+  state.target = target;
+  state.current = evidence;
+  const count = evidence.expandCount;
+  const initialCount = Number.isSafeInteger(count) && count > 0
+    && count <= MAX_INSTAGRAM_ONE_PAGE_REPLIES && evidence.expandControlCount === 1
+    && evidence.pendingControlCount === 1 && evidence.hideControlCount === 0
+    && evidence.totalReplies === 0 && !evidence.loading;
+  if (initialCount && !state.expandAttempted) {
+    if (state.declaredCount !== null && state.declaredCount !== count) state.invalidated = true;
+    else state.declaredCount = count;
+  }
+  const terminal = !state.invalidated && state.expandAttempted && state.declaredCount !== null
+    && evidence.totalReplies === state.declaredCount && evidence.hideControlCount === 1
+    && !evidence.expansionPending && !evidence.loading;
+  if (terminal) {
+    const fingerprint = digestObject(evidence.rows, "Instagram native reply rows");
+    if (state.terminalFingerprint !== null && state.terminalFingerprint !== fingerprint) {
+      state.invalidated = true;
+      state.stableReads = 0;
+    } else {
+      state.terminalFingerprint = fingerprint;
+      state.stableReads = Math.min(2, state.stableReads + 1);
+    }
+  } else {
+    if (state.terminalFingerprint !== null) state.invalidated = true;
+    state.stableReads = 0;
+  }
+  const exhaustiveThread = !state.invalidated && terminal && state.stableReads === 2;
+  return immutableJsonSnapshot({
+    schema_version: 1, candidate_only: true, exhaustiveThread,
+    scope: "instagram_native_one_page_parent_bound_replies",
+    action_digest: digestObject(action, "Instagram reply action"), binding_digest: binding,
+    document_binding: documentBinding, observed_url: observedUrl,
+    declared_count: state.declaredCount, observed_count: evidence.totalReplies,
+    expansion_attempted: state.expandAttempted, stable_reads: state.stableReads,
+    rows_digest: state.terminalFingerprint,
+    reason: exhaustiveThread ? "observed_count_and_two_native_reads_agree"
+      : state.invalidated ? "reply_evidence_changed"
+        : state.declaredCount === null ? "pre_expansion_count_not_observed"
+          : "native_reply_expansion_not_stably_exhausted",
+  }, "Instagram reply exhaustion candidate");
+}
+
 async function inspectInstagram(tab, action, phase) {
-  const observedUrl = await currentUrl(tab, action);
-  const identity = instagramUrlIdentity(liveReplyUrl(action), { allowComment: true });
-  if (!identity.commentId) fail("Instagram inspection requires its native comment permalink");
-  const account = requiredString(action.scope.account_key, "Instagram account").replace(/^@/u, "");
-  const accountEvidence = await tab.playwright.evaluate((expected) => {
+  const generation = (instagramReadGenerations.get(tab) ?? 0) + 1;
+  instagramReadGenerations.set(tab, generation);
+  try {
+    return await readInstagramReplySurface(tab, action, phase, generation);
+  } catch (error) {
+    const state = instagramReplyEvidence.get(tab);
+    if (state) { state.invalidated = true; state.stableReads = 0; }
+    throw error;
+  }
+}
+
+function instagramNativeTarget(rawTarget) {
+  const target = immutableJsonSnapshot(rawTarget, "Instagram native target identity");
+  if (target?.platform !== "instagram") fail("native target reading is only verified for Instagram");
+  const post = trustedUrl("instagram", target.post_permalink);
+  const comment = trustedUrl("instagram", target.comment_permalink);
+  const postIdentity = instagramUrlIdentity(target.post_permalink);
+  const identity = instagramUrlIdentity(target.comment_permalink, { allowComment: true });
+  const account = requiredString(target.account_key, "Instagram account").replace(/^@/u, "");
+  if (!/^[A-Za-z0-9._]+$/u.test(account) || !identity.commentId
+      || comment.hostname !== post.hostname || identity.shortcode !== postIdentity.shortcode
+      || identity.query !== postIdentity.query || identity.shortcode !== target.post_key
+      || identity.commentId !== target.platform_comment_id) {
+    fail("Instagram native target differs from its approved account, post or comment identity");
+  }
+  return { account, commentUrl: comment.toString(),
+    anchorPath: `/p/${identity.shortcode}/c/${identity.commentId}/`, commentId: identity.commentId };
+}
+
+function rehydrateInstagramRow(raw) {
+  const keys = ["author", "authorDisplay", "body", "path"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)
+      || Object.keys(raw).length !== keys.length
+      || keys.some((key) => !Object.hasOwn(raw, key) || typeof raw[key] !== "string" || !raw[key])) {
+    fail("Instagram native reply row has an unexpected string schema");
+  }
+  return { author: raw.author, authorDisplay: raw.authorDisplay, body: raw.body, path: raw.path };
+}
+
+async function readInstagramNativeComment(tab, native) {
+  const tabId = requiredString(tab.id, "Instagram source-owned tab id");
+  const previousTabId = instagramTabIds.get(tab);
+  if (previousTabId !== undefined && previousTabId !== tabId) fail("Instagram source-owned tab id changed");
+  instagramTabIds.set(tab, tabId);
+  const observedUrl = trustedUrl("instagram", await tab.url()).toString();
+  if (observedUrl !== native.commentUrl) fail("live reply left its approved comment URL");
+  const { account, anchorPath } = native;
+  const readAccount = (expected) => {
     const links = [...document.querySelectorAll('a[href]')].filter((a) => {
       if (a.closest('main,[role="dialog"]') || !a.querySelector('img[alt$="的大頭貼照"]')) return false;
       for (let p = a.parentElement, depth = 0; p && depth < 7; p = p.parentElement, depth += 1) {
@@ -280,14 +386,15 @@ async function inspectInstagram(tab, action, phase) {
       }
       return false;
     });
-    return links.length > 0 && links.length <= 4 && links.every((a) =>
+    const valid = links.length > 0 && links.length <= 4 && links.every((a) =>
       a.getAttribute("href") === `/${expected}/`
       && a.querySelector('img')?.getAttribute("alt") === `${expected}的大頭貼照`)
       && links.some((a) => a.getClientRects().length > 0);
-  }, account);
+    return valid;
+  };
+  const accountEvidence = await tab.playwright.evaluate(readAccount, account);
   if (!accountEvidence) fail("Instagram active account navigation changed");
   const article = await unique(tab.playwright.locator("article"), "Instagram native post article");
-  const anchorPath = `/p/${identity.shortcode}/c/${identity.commentId}/`;
   const target = article.locator("li").filter({ has: tab.playwright.locator(`a[href=${JSON.stringify(anchorPath)}]`) });
   await unique(target, "Instagram native parent comment");
   const evidence = await target.evaluate((li, expected) => {
@@ -306,12 +413,13 @@ async function inspectInstagram(tab, action, phase) {
           || body.querySelector('button,[role="button"]')) return null;
       const handle = links[0].getAttribute("href").match(/^\/([A-Za-z0-9._]+)\/$/u)?.[1];
       const anchors = [...controls.querySelectorAll('a[href]')].filter((a) => a.querySelector("time"));
-      if (!handle || anchors.length !== 1 || !body.getClientRects().length) return null;
-      return { author: handle, body: norm(body.innerText), path: anchors[0].getAttribute("href") };
+      const bodyText = norm(body.innerText);
+      if (!handle || anchors.length !== 1 || !body.getClientRects().length || !bodyText) return null;
+      return { author: handle, authorDisplay: norm(links[0].innerText) || handle,
+        body: bodyText, path: anchors[0].getAttribute("href") };
     };
     const parent = read(li);
-    if (!parent || parent.path !== expected.path || parent.author !== expected.author
-        || parent.body !== norm(expected.body)) return { valid: false };
+    if (!parent || parent.path !== expected.path) return { valid: false };
     const thread = li.closest("ul");
     if (!thread) return { valid: false };
     const children = [...thread.querySelectorAll("li")].filter((item) => item !== li);
@@ -323,19 +431,91 @@ async function inspectInstagram(tab, action, phase) {
           || !/^\d+\/$/u.test(row.path.slice(`${expected.path}r/`.length))) return { valid: false };
       replies.push(row);
     }
+    if (new Set(replies.map((row) => row.path)).size !== replies.length) return { valid: false };
+    const visible = (node) => node.getClientRects().length > 0;
+    const controls = [...thread.querySelectorAll('button,[role="button"]')].filter(visible);
+    const rootControls = controls.filter((node) => {
+      // Native disclosure wrappers may nest LI > UL > LI without owning an
+      // author H3. Never cross a real child comment's LI-owned author heading.
+      let ancestor = node.parentElement;
+      for (let depth = 0; ancestor && depth < 8; depth += 1, ancestor = ancestor.parentElement) {
+        if (ancestor === thread) return true;
+        if (ancestor.tagName === "LI" && ancestor !== li
+            && [...ancestor.querySelectorAll("h3")].some((heading) => heading.closest("li") === ancestor)) {
+          return false;
+        }
+      }
+      return false;
+    });
+    const label = (node) => norm(node.getAttribute("aria-label") || node.innerText);
+    const expandControls = rootControls.filter((node) => /^查看回覆/u.test(label(node)));
+    const expandLabel = expandControls.length === 1 ? label(expandControls[0]) : null;
+    const countMatch = expandLabel?.match(/^查看回覆（([1-9]\d*)）$/u);
+    const hideControlCount = rootControls.filter((node) => label(node) === "隱藏回覆").length;
+    const loading = thread.getAttribute("aria-busy") === "true"
+      || [...thread.querySelectorAll('[role="progressbar"],[role="status"],[aria-busy="true"]')]
+        .some((node) => visible(node) && (node.getAttribute("role") === "progressbar"
+          || node.getAttribute("aria-busy") === "true" || /載入中/u.test(label(node))));
+    const pendingControlCount = controls.filter(
+      (node) => /查看.*回覆|顯示.*回覆|載入中|載入更多/u.test(label(node)),
+    ).length;
+    const expansionPending = loading || pendingControlCount > 0;
     const own = replies.filter((row) => row.author === expected.account);
-    return { valid: true, totalReplies: replies.length, ownReplyCount: own.length,
-      exactOwnCount: own.filter((row) => row.body === norm(expected.reply)).length,
-      expansionPending: /查看回覆|查看全部.*回覆|載入中/u.test(thread.innerText) };
-  }, { path: anchorPath, author: action.author_key, body: action.expected_body,
-    account, reply: action.reply_text });
+    return { valid: true, parent, totalReplies: replies.length, ownReplyCount: own.length,
+      rows: replies.sort((a, b) => a.path.localeCompare(b.path)),
+      loading, expansionPending,
+      expandControlCount: expandControls.length, expandLabel, pendingControlCount,
+      expandCount: countMatch ? Number(countMatch[1]) : null, hideControlCount };
+  }, { path: anchorPath, account });
   if (!evidence.valid) fail("Instagram native parent, author or complete body changed");
+  // Browser evaluation may return another realm's plain objects/array. Rebuild
+  // only this reviewed row schema; retain the global immutable-JSON guard.
+  if (!Array.isArray(evidence.rows)) fail("Instagram native reply rows are not an array");
+  const rows = [];
+  for (const row of evidence.rows) rows.push(rehydrateInstagramRow(row));
+  evidence.rows = rows;
+  evidence.parent = rehydrateInstagramRow(evidence.parent);
+  const endAccount = await tab.playwright.evaluate(readAccount, account);
+  if (trustedUrl("instagram", await tab.url()).toString() !== observedUrl
+      || tab.id !== tabId || !endAccount) {
+    fail("Instagram native tab, account or URL changed while reading its target");
+  }
+  // This is observed UI continuity, not a physical document epoch or node ID.
+  // A same-URL reload with identical UI is deliberately not claimed detectable.
+  evidence.documentBinding = immutableJsonSnapshot({
+    schema_version: 1, kind: "source_owned_ui_continuity", tab_id: tabId,
+    observed_url: observedUrl,
+    target_digest: digestObject({ account_key: native.account, comment_permalink: native.commentUrl,
+      author_key: evidence.parent.author, body: evidence.parent.body }),
+  }, "Instagram source-owned UI continuity");
+  return { observedUrl, article, target, evidence };
+}
+
+async function readInstagramReplySurface(tab, action, phase, generation) {
+  const native = instagramNativeTarget({
+    platform: action.scope.platform, account_key: action.scope.account_key,
+    post_key: action.scope.post_key, post_permalink: action.post_permalink,
+    comment_permalink: liveReplyUrl(action),
+    platform_comment_id: action.comment_anchor.platform_comment_id,
+  });
+  const { observedUrl, article, target, evidence } = await readInstagramNativeComment(tab, native);
+  if (evidence.parent.author !== action.author_key || evidence.parent.body !== normalize(action.expected_body)) {
+    fail("Instagram native parent, author or complete body changed");
+  }
+  evidence.exactOwnCount = evidence.rows.filter(
+    (row) => row.author === native.account && row.body === normalize(action.reply_text),
+  ).length;
+  if (instagramReadGenerations.get(tab) !== generation) {
+    fail("Instagram reply inspections overlapped");
+  }
+  const replyExhaustionCandidate = recordInstagramReplyEvidence(tab, action, observedUrl, target, evidence);
   // Native /c/P/r/R anchors prove observed child ownership, not exhaustive
   // pagination or the selected reply state of the shared post-level textarea.
   // In particular, an @author prefill is not sufficient parent-state evidence.
   const base = { observedUrl, complete: false, totalReplies: evidence.totalReplies,
     ownReplyCount: evidence.ownReplyCount, exactOwnCount: evidence.exactOwnCount,
     expansionPending: evidence.expansionPending,
+    exhaustiveThread: replyExhaustionCandidate.exhaustiveThread, replyExhaustionCandidate,
     blockedReason: "instagram_reply_exhaustion_and_selected_parent_not_verified" };
   if (phase === "after") return base;
   const composer = article.getByRole("textbox", { name: "留言⋯⋯", exact: true });
@@ -346,6 +526,140 @@ async function inspectInstagram(tab, action, phase) {
   await unique(form, "Instagram comment form");
   return { ...base, trigger: target.getByRole("button", { name: "回覆", exact: true }),
     composer, submit: form.getByRole("button", { name: "發佈", exact: true }) };
+}
+
+/** One source-owned expansion of the observed native IG shape; never compose or submit. */
+export async function prepareLiveReplyThread(tab, action) {
+  assertAction(action);
+  if (action.scope.platform !== "instagram") fail("native reply preparation is only verified for Instagram");
+  if (instagramPreparations.has(tab)) fail("Instagram reply preparation is already running");
+  instagramPreparations.add(tab);
+  try {
+    await inspectInstagram(tab, action, "after");
+    const state = instagramReplyEvidence.get(tab);
+    if (!state || state.invalidated || state.declaredCount === null) {
+      fail("Instagram requires a positive observed pre-expansion reply count");
+    }
+    if (!state.expandAttempted) {
+      const current = state.current;
+      if (current.expandControlCount !== 1 || !current.expandLabel || current.loading
+          || current.pendingControlCount !== 1 || current.totalReplies !== 0 || current.hideControlCount !== 0) {
+        fail("Instagram initial reply expansion is not uniquely bound");
+      }
+      const thread = await unique(state.target.locator("xpath=ancestor::ul[1]"), "Instagram native parent thread");
+      const expand = await unique(thread.getByRole("button", { name: current.expandLabel, exact: true }),
+        "Instagram native count-bound reply expansion");
+      // Latch before awaiting click: an ambiguous expansion never causes a second click.
+      state.expandAttempted = true;
+      let attempts = instagramExpansionAttempts.get(tab);
+      if (!attempts) { attempts = new Set(); instagramExpansionAttempts.set(tab, attempts); }
+      attempts.add(state.binding);
+      await expand.click();
+      // Wait only for the count-bound native child anchors to become visible.
+      // This is UI readiness, not terminal/absence evidence; the two complete
+      // parent-bound row reads below still decide whether the candidate holds.
+      await thread.locator(`a[href^=${JSON.stringify(`${current.parent.path}r/`)}]`)
+        .filter({ has: tab.playwright.locator("time") }).nth(state.declaredCount - 1)
+        .waitFor({ state: "visible", timeoutMs: 10000 });
+    }
+    await inspectInstagram(tab, action, "after");
+    const final = await inspectInstagram(tab, action, "after");
+    if (!final.exhaustiveThread) fail("Instagram native reply expansion is not stably exhausted");
+    const verified = instagramReplyEvidence.get(tab);
+    if (final.ownReplyCount === 0 && final.exactOwnCount === 0 && !verified.preflightBaseline) {
+      verified.preflightBaseline = immutableJsonSnapshot({
+        binding: verified.binding, documentBinding: verified.documentBinding,
+        documentKey: verified.documentKey, rows: verified.current.rows,
+      }, "Instagram private preflight reply baseline");
+    }
+    return final;
+  } finally {
+    instagramPreparations.delete(tab);
+  }
+}
+
+/** Read one native comment from its approved identity; no caller body or author is used. */
+export async function readLiveTargetComment(tab, target) {
+  const native = instagramNativeTarget(target);
+  const { observedUrl, evidence } = await readInstagramNativeComment(tab, native);
+  return immutableJsonSnapshot({
+    comment: {
+      platform_comment_id: native.commentId, comment_permalink: native.commentUrl,
+      observed_parent_post_permalink: new URL(
+        evidence.parent.path.replace(/\/c\/[^/]+\/$/u, ""), observedUrl,
+      ).toString(),
+      author_key: evidence.parent.author, author_display: evidence.parent.authorDisplay,
+      body: evidence.parent.body, body_complete: true,
+      is_own: evidence.parent.author === native.account,
+      // This is observed presence only; the raw intake never certifies absence.
+      has_own_reply: evidence.ownReplyCount > 0, language: null,
+    },
+    documentBinding: evidence.documentBinding, observedUrl,
+  }, "Instagram native target comment observation");
+}
+
+function newInstagramCanaryReply(state, baseline, action) {
+  const current = state.current;
+  if (state.binding !== baseline.binding || state.documentKey !== baseline.documentKey
+      || current.loading || current.expansionPending || current.hideControlCount !== 1
+      || current.ownReplyCount !== 1 || current.exactOwnCount !== 1
+      || current.rows.length !== baseline.rows.length + 1) {
+    fail("Instagram positive canary readback is not complete and parent-bound");
+  }
+  const original = new Map(baseline.rows.map((row) => [row.path, row]));
+  const added = [];
+  for (const row of current.rows) {
+    const previous = original.get(row.path);
+    if (previous) {
+      if (digestObject(row) !== digestObject(previous)) fail("Instagram original reply changed during canary readback");
+      original.delete(row.path);
+    } else added.push(row);
+  }
+  const account = action.scope.account_key.replace(/^@/u, "");
+  if (original.size || added.length !== 1 || added[0].author !== account
+      || added[0].body !== normalize(action.reply_text)) {
+    fail("Instagram canary readback requires exactly one new approved own reply");
+  }
+  return added[0];
+}
+
+/** Positive sent evidence only. No caller baseline, absence result, or submit retry. */
+export async function inspectLiveCanaryResult(tab, action) {
+  assertAction(action);
+  if (action.scope.platform !== "instagram") fail("native canary readback is only verified for Instagram");
+  if (instagramPreparations.has(tab)) fail("Instagram reply preparation or canary readback is already running");
+  const state = instagramReplyEvidence.get(tab);
+  const baseline = state?.preflightBaseline;
+  const expectedBinding = digestObject({ action, observedUrl: liveReplyUrl(action) });
+  if (!baseline || baseline.binding !== expectedBinding) {
+    fail("Instagram positive canary readback requires its private zero-own preflight baseline");
+  }
+  instagramPreparations.add(tab);
+  try {
+    let firstDigest = null;
+    let reply = null;
+    let inspection = null;
+    for (let read = 0; read < 2; read += 1) {
+      inspection = await inspectInstagram(tab, action, "after");
+      if (instagramReplyEvidence.get(tab) !== state) fail("Instagram canary UI or action binding changed");
+      reply = newInstagramCanaryReply(state, baseline, action);
+      const digest = digestObject(state.current.rows, "Instagram positive canary reply rows");
+      if (firstDigest !== null && firstDigest !== digest) fail("Instagram positive canary rows are not stable");
+      firstDigest = digest;
+    }
+    return immutableJsonSnapshot({
+      observedUrl: inspection.observedUrl, complete: false, exhaustiveThread: false,
+      verifiedNewReply: true, positive_only: true, absence_proven: false,
+      replyPermalink: new URL(reply.path, inspection.observedUrl).toString(),
+      totalReplies: state.current.totalReplies, ownReplyCount: 1, exactOwnCount: 1,
+      action_digest: digestObject(action), binding_digest: baseline.binding,
+      documentBinding: baseline.documentBinding, baseline_rows_digest: digestObject(baseline.rows),
+      rows_digest: firstDigest, stable_reads: 2,
+      blockedReason: "instagram_selected_parent_proof_is_separate_from_positive_readback",
+    }, "Instagram positive canary result");
+  } finally {
+    instagramPreparations.delete(tab);
+  }
 }
 
 export async function inspectLiveReplySurface(tab, action, phase = "before") {

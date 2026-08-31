@@ -18,6 +18,8 @@ from comment_test_browser_contract import run_browser_contract_tests
 from comment_test_browser_recovery import run_browser_recovery_tests
 from comment_test_browser_receipt_provenance import run_browser_receipt_provenance_tests
 from comment_test_browser_send_urls import run_browser_send_url_tests
+from comment_test_browser_target import run_browser_target_tests
+from comment_test_canary import run_canary_tests
 from comment_test_cli import run_cli_tests
 from comment_test_fixture_promotion_envelope import (
     run_fixture_promotion_envelope_tests,
@@ -182,6 +184,8 @@ def run_comment_self_tests() -> None:
     _run_step("browser-adapter", run_browser_adapter_tests)
     _run_step("browser-contract", run_browser_contract_tests)
     _run_step("browser-send-urls", run_browser_send_url_tests)
+    _run_step("browser-target", run_browser_target_tests)
+    _run_step("single-action-canary", run_canary_tests)
     _run_step("browser-receipt-provenance", run_browser_receipt_provenance_tests)
     _run_step("browser-recovery", run_browser_recovery_tests)
     _run_step("js-architecture-config", run_js_architecture_config_test)

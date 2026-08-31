@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from comment_browser_common import (
@@ -11,7 +12,8 @@ from comment_browser_common import (
     _require_schema_version, _required_digest,
     _required_boolean, _required_string,
 )
-from comment_domain import stable_id
+from comment_identity import stable_id
+from comment_canary import CANARY_ATTEMPT_FIELDS, canary_settlement_allowed, require_canary_lease
 from comment_scan_provenance import (
     ACTION_PROVENANCE_DIGEST_FIELD,
     DRAFT_PROVENANCE_DIGEST_FIELD,
@@ -32,6 +34,10 @@ PREFLIGHT_FLAGS = (
     "account_verified", "post_verified", "target_verified",
     "body_complete", "composer_empty_before_fill", "composer_matches_reply",
     "reply_control_verified",
+)
+CANARY_COMPOSER_FIELDS = (
+    "composer_initial_state", "composer_initial_text",
+    "selected_parent_evidence", "selected_parent_evidence_digest",
 )
 
 
@@ -122,6 +128,10 @@ def _browser_action_from_ledger(
         "submission_boundary": "run browser-begin immediately before one submit action",
         "verification_rule": "exact own-account reply visible under the target comment",
     }
+    provenance = comment.get("scan_provenance") or {}
+    if provenance.get("evidence_scope") == "target_comment_receipt_continuity_only":
+        action["observation_scope"] = "target_comment"
+        action["observation_target"] = provenance.get("target")
     return {
         **action,
         **browser_action_provenance_fields(action, draft, comment),
@@ -182,6 +192,14 @@ def build_browser_recovery_action(
         "browser recovery attempt has no valid baseline total reply count",
     )
     preparation_id = _required_digest(attempt, "browser_preparation_id")
+    canary_attempt = {}
+    if any(key in attempt for key in CANARY_ATTEMPT_FIELDS):
+        if not canary_settlement_allowed(state):
+            raise ValueError("browser recovery canary marker has no consumed canonical lease")
+        canary_attempt = {
+            "canary_lease_id": attempt["browser_canary_lease_id"],
+            "canary_lease_digest": attempt["browser_canary_lease_digest"],
+        }
     return {
         "schema_version": 1, "decision": "RECONCILE_ONLY", "operation": "browser-reconcile",
         "recovery_session_id": recovery_session_id,
@@ -198,6 +216,7 @@ def build_browser_recovery_action(
             "claim_id": _required_string(attempt, "browser_submit_claim_id"),
             "preflight_id": _required_string(attempt, "browser_preflight_id"),
             "attempt_session_id": attempt_session_id,
+            **canary_attempt,
         },
     }
 
@@ -244,6 +263,10 @@ def _require_preparation_binding(
         "baseline_total_reply_count": total_count,
         "test_only": False,
     }
+    if any(key in raw for key in CANARY_COMPOSER_FIELDS):
+        if not all(key in raw for key in CANARY_COMPOSER_FIELDS):
+            raise ValueError("canary composer evidence must include every versioned field")
+        core.update({key: raw[key] for key in CANARY_COMPOSER_FIELDS})
     preparation_id = _required_digest(raw, "preparation_id")
     if preparation_id != _json_digest(core):
         raise ValueError("browser preflight preparation_id integrity check failed")
@@ -253,6 +276,7 @@ def _require_preparation_binding(
         "preparation_id": preparation_id,
         "baseline_exact_reply_count": exact_count,
         "baseline_total_reply_count": total_count,
+        **{key: raw[key] for key in CANARY_COMPOSER_FIELDS if key in raw},
     }
 
 
@@ -282,10 +306,64 @@ def _require_send_observed_url(comment: dict[str, Any], observed_url: str) -> st
     return _require_post_url(platform, observed_url, post_permalink, "observed_url")
 
 
+def _require_canary_native_mention(
+    raw: dict[str, Any], action: dict[str, Any], state: dict[str, Any], lease_id: str | None,
+) -> None:
+    if not lease_id or action["scope"]["platform"] != "instagram":
+        raise ValueError("nonempty native composer requires an authorized Instagram canary")
+    require_canary_lease(state, lease_id, action["intent_id"], action["session_id"], action=action)
+    author = action.get("author_key")
+    if not isinstance(author, str) or not re.fullmatch(r"[A-Za-z0-9._]+", author):
+        raise ValueError("native mention requires an exact Instagram author handle")
+    prefix = f"@{author} "
+    if raw.get("composer_initial_state") != "native_target_mention" or raw.get("composer_initial_text") != prefix:
+        raise ValueError("native composer initial text differs from the approved target mention")
+    if not action["reply_text"].startswith(prefix) or len(action["reply_text"]) <= len(prefix):
+        raise ValueError("approved Instagram reply must preserve the exact native target mention")
+    evidence = raw.get("selected_parent_evidence")
+    keys = {"schema_version", "action_digest", "observed_url", "comment_key", "platform_comment_id",
+            "author_key", "document_binding", "trigger_locator_digest", "composer_node_id", "initial_text"}
+    if not isinstance(evidence, dict) or set(evidence) != keys or type(evidence.get("schema_version")) is not int or evidence["schema_version"] != 1:
+        raise ValueError("native selected-parent evidence has an invalid schema")
+    expected = {
+        "action_digest": _json_digest(action), "observed_url": raw["observed_url"],
+        "comment_key": action["scope"]["comment_key"],
+        "platform_comment_id": action["comment_anchor"]["platform_comment_id"],
+        "author_key": author, "initial_text": prefix,
+        "trigger_locator_digest": _json_digest({
+            "platform_comment_id": action["comment_anchor"]["platform_comment_id"],
+            "comment_permalink": action["comment_anchor"]["comment_permalink"],
+            "author_key": author, "expected_body": action["expected_body"],
+            "role": "button", "name": "回覆",
+        }),
+    }
+    if not expected["platform_comment_id"] or any(evidence.get(key) != value for key, value in expected.items()):
+        raise ValueError("native selected-parent evidence differs from the canonical action")
+    binding = evidence["document_binding"]
+    binding_keys = {"schema_version", "kind", "tab_id", "observed_url", "target_digest"}
+    if not isinstance(binding, dict) or set(binding) != binding_keys or type(binding.get("schema_version")) is not int or binding["schema_version"] != 1:
+        raise ValueError("native selected-parent document binding has an invalid schema")
+    target_digest = _json_digest({
+        "account_key": action["scope"]["account_key"].removeprefix("@"),
+        "comment_permalink": action["comment_anchor"]["comment_permalink"],
+        "author_key": action["author_key"], "body": action["expected_body"],
+    })
+    if (binding["kind"] != "source_owned_ui_continuity"
+            or binding["observed_url"] != action["comment_anchor"]["comment_permalink"]
+            or binding["observed_url"] != raw["observed_url"]
+            or _required_digest(binding, "target_digest") != target_digest):
+        raise ValueError("native selected-parent document binding differs from the canonical target")
+    _required_string(binding, "tab_id")
+    _required_string(evidence, "composer_node_id")
+    if _required_digest(raw, "selected_parent_evidence_digest") != _json_digest(evidence):
+        raise ValueError("native selected-parent evidence digest differs")
+
+
 def validate_browser_preflight(
     raw: dict[str, Any], latest_comments: dict[str, dict[str, Any]],
     states: dict[str, dict[str, Any]], policy: dict[str, Any],
     intent_id: str, session_id: str,
+    *, canary_lease_id: str | None = None,
 ) -> dict[str, Any]:
     """Validate a fresh, read-only Chrome preflight before send_started."""
     if not isinstance(raw, dict):
@@ -313,8 +391,13 @@ def validate_browser_preflight(
         raise ValueError("browser preflight occurred after permit expiry")
     preparation = _require_preparation_binding(raw, expected_action)
     for key in PREFLIGHT_FLAGS:
+        if key == "composer_empty_before_fill" and _required_boolean(raw, key) is False:
+            _require_canary_native_mention(raw, expected_action, state, canary_lease_id)
+            continue
         if not _required_boolean(raw, key):
             raise ValueError(f"browser preflight {key} was not verified")
+    if raw["composer_empty_before_fill"] and any(key in raw for key in CANARY_COMPOSER_FIELDS):
+        raise ValueError("empty composer cannot claim native nonempty mention evidence")
     evidence = _required_string(raw, "evidence")
     preflight_id = stable_id(
         "browser-preflight", intent_id, preparation["preparation_id"], observed_at, evidence,

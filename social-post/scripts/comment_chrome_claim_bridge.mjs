@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import {
-  assertSingleLine, digestObject, fail, immutableJsonSnapshot, nowIso,
+  assertSingleLine, canonicalUrl, digestObject, fail, immutableJsonSnapshot, nowIso,
   requiredString, unique,
 } from "./comment_chrome_common.mjs";
 import { createScanPost } from "./comment_chrome_scan.mjs";
@@ -13,9 +13,11 @@ import { createSendOperations } from "./comment_chrome_send.mjs";
 import {
   actionDigest, assertAction, claimRequest, preparationCore, validateWriteDecision,
 } from "./comment_chrome_send_support.mjs";
-import { loadSetupBrowserRuntime } from "./comment_chrome_runtime_authority.mjs";
+import { getSourceOwnedChromeBrowser } from "./comment_chrome_runtime_authority.mjs";
 import {
   bindLiveReplyBrowser, bindLiveSubmitNode, inspectLiveReplySurface, liveReplyUrl,
+  prepareLiveReplyThread, inspectLiveCanaryResult, readLiveTargetComment,
+  LIVE_REPLY_ADAPTER_VERSION,
 } from "./comment_chrome_live_surface.mjs";
 
 
@@ -29,8 +31,14 @@ const SCAN_OPERATION = "browser-scan";
 const liveReplyExecutionReservations = new Set();
 const liveReplyRecoveryContexts = new Map();
 const liveReplyRecoveryInFlight = new Set();
+const liveCanaryContexts = new WeakSet();
+const liveCanarySelections = new WeakMap();
 
-async function requireLiveReplyPolicy() {
+async function requireLiveReplyPolicy(canary) {
+  if (canary !== undefined) {
+    if (!liveCanaryContexts.has(canary)) fail("live canary requires a source-owned context");
+    return checkLiveCanaryLease(canary);
+  }
   const policy = JSON.parse(await readFile(
     new URL("../references/comment-policy.json", import.meta.url), "utf8",
   ));
@@ -39,10 +47,11 @@ async function requireLiveReplyPolicy() {
   }
 }
 
-async function readApprovedReplyAction(intentId, sessionId) {
+async function readApprovedReplyAction(intentId, sessionId, canaryLeaseId) {
+  const extra = canaryLeaseId ? ["--canary-lease-id", canaryLeaseId] : [];
   const child = spawn("python", [
-    DEFAULT_SCRIPT, "browser-action", "--intent-id", intentId,
-    "--session-id", sessionId,
+    "-X", "utf8", DEFAULT_SCRIPT, "browser-action", "--intent-id", intentId,
+    "--session-id", sessionId, ...extra,
   ], { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   const stdoutPromise = collect(child.stdout, child, "action bridge stdout");
   const stderrPromise = collect(child.stderr, child, "action bridge stderr");
@@ -79,6 +88,41 @@ async function readApprovedReplyAction(intentId, sessionId) {
   }
   requireCurrentReplyPermit(action);
   return action;
+}
+
+async function checkLiveCanaryLease(context) {
+  const args = ["-X", "utf8", DEFAULT_SCRIPT, "browser-canary-check",
+    "--intent-id", context.intentId, "--session-id", context.sessionId,
+    "--canary-lease-id", context.leaseId];
+  if (context.claimId) args.push("--claim-id", context.claimId);
+  const child = spawn("python", args, {
+    shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+  });
+  const out = collect(child.stdout, child, "canary lease check stdout");
+  const err = collect(child.stderr, child, "canary lease check stderr");
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill(); reject(new Error("canary lease check timed out")); }, 15000);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (value) => { clearTimeout(timer); resolve(value); });
+  });
+  const [stdout, stderr] = await Promise.all([out, err]);
+  if (code !== 0) fail(`canary lease is not valid: ${stderr.trim().slice(0, 1000)}`);
+  let checked;
+  try { checked = JSON.parse(stdout); } catch { fail("canary lease check returned malformed JSON"); }
+  if (!checked || checked.schema_version !== 1 || checked.intent_id !== context.intentId
+      || checked.session_id !== context.sessionId
+      || checked.lease_id !== context.leaseId
+      || checked.decision !== (context.claimId ? "CANARY_CLAIMED" : "CANARY_READY")
+      || checked.claim_id !== (context.claimId ?? null)
+      || checked.action_digest !== actionDigest(context.action)
+      || checked.action_id !== context.action.action_id
+      || !/^[0-9a-f]{64}$/u.test(checked.lease_digest ?? "")
+      || !/^[0-9a-f]{64}$/u.test(checked.source_digest ?? "")
+      || !Number.isFinite(Date.parse(checked.expires_at))
+      || Date.now() >= Date.parse(checked.expires_at)) {
+    fail("canary lease check returned an unbound or expired result");
+  }
+  return checked;
 }
 
 function requireCurrentReplyPermit(action) {
@@ -121,10 +165,24 @@ async function readExactLiveComposer(composer) {
   return value.normalize("NFC");
 }
 
-async function inspectReadyLiveComposer(tab, action) {
-  const surface = requireCompleteLiveSurface(
-    await inspectLiveReplySurface(tab, action, "before"), { requireNoOwnReply: true },
-  );
+function requireCanaryThread(surface, action) {
+  const proof = surface?.replyExhaustionCandidate;
+  if (action.scope.platform !== "instagram" || surface?.exhaustiveThread !== true
+      || !proof || proof.candidate_only !== true || proof.stable_reads !== 2
+      || proof.action_digest !== actionDigest(action)
+      || proof.observed_count !== surface.totalReplies || surface.ownReplyCount !== 0
+      || surface.exactOwnCount !== 0 || !Number.isSafeInteger(surface.totalReplies)
+      || surface.totalReplies < 1 || proof.observed_url !== liveReplyUrl(action)) {
+    fail("canary has no exhaustive native zero-own target thread");
+  }
+  return surface;
+}
+
+async function inspectReadyLiveComposer(tab, action, canary) {
+  const observed = await inspectLiveReplySurface(tab, action, "before");
+  const surface = canary
+    ? requireCanaryThread(observed, action)
+    : requireCompleteLiveSurface(observed, { requireNoOwnReply: true });
   if (!surface.composer) fail("approved parent has no verified reply composer");
   const composer = await unique(surface.composer, "live reply composer", { enabled: true });
   if ((await readExactLiveComposer(composer)) !== action.reply_text) {
@@ -132,7 +190,75 @@ async function inspectReadyLiveComposer(tab, action) {
   }
   if (!surface.submit) fail("approved parent has no verified reply submit control");
   await unique(surface.submit, "live reply submit control", { enabled: true });
+  if (canary) {
+    const selected = liveCanarySelections.get(tab);
+    if (!selected || selected.action_digest !== actionDigest(action)
+        || selected.observed_url !== surface.observedUrl
+        || digestObject(selected.document_binding) !== digestObject(surface.replyExhaustionCandidate.document_binding)
+        || await bindLiveSubmitNode(tab, composer) !== selected.composer_node_id) {
+      fail("canary composer lost its source-owned parent selection");
+    }
+  }
   return surface;
+}
+
+async function prepareLiveCanaryReply(tab, action, plan, canary) {
+  await requireLiveReplyPolicy(canary);
+  requireCurrentReplyPermit(action);
+  let surface = requireCanaryThread(await prepareLiveReplyThread(tab, action), action);
+  surface = requireCanaryThread(await inspectLiveReplySurface(tab, action, "before"), action);
+  const initialComposer = await unique(surface.composer, "canary untouched composer", { enabled: true });
+  if (await readExactLiveComposer(initialComposer) !== "") fail("canary will not overwrite an existing draft");
+  await bindLiveSubmitNode(tab, initialComposer);
+  const triggerBinding = {
+    platform_comment_id: action.comment_anchor.platform_comment_id,
+    comment_permalink: action.comment_anchor.comment_permalink,
+    author_key: action.author_key, expected_body: action.expected_body,
+    role: "button", name: "回覆",
+  };
+  await requireLiveReplyPolicy(canary);
+  // Re-resolve from the exact native parent after the lease check, immediately
+  // before the UI action. The selector digest is semantic, not a node proof.
+  surface = requireCanaryThread(await inspectLiveReplySurface(tab, action, "before"), action);
+  if (await readExactLiveComposer(surface.composer) !== "") fail("canary draft changed before selecting parent");
+  const trigger = await unique(surface.trigger, "canary exact parent reply trigger", { enabled: true });
+  await trigger.click({ timeoutMs: 5000 });
+  const selected = requireCanaryThread(await inspectLiveReplySurface(tab, action, "before"), action);
+  if (digestObject(selected.replyExhaustionCandidate.document_binding)
+      !== digestObject(surface.replyExhaustionCandidate.document_binding)) {
+    fail("canary native target UI changed while selecting the parent");
+  }
+  const composer = await unique(selected.composer, "canary selected reply composer", { enabled: true });
+  const prefix = `@${action.author_key} `;
+  if (await readExactLiveComposer(composer) !== prefix || !action.reply_text.startsWith(prefix)) {
+    fail("canary native mention or approved text differs from the selected parent");
+  }
+  const composerNodeId = await bindLiveSubmitNode(tab, composer);
+  const selection = immutableJsonSnapshot({
+    schema_version: 1, action_digest: actionDigest(action), observed_url: selected.observedUrl,
+    comment_key: action.scope.comment_key, platform_comment_id: action.comment_anchor.platform_comment_id,
+    author_key: action.author_key, document_binding: selected.replyExhaustionCandidate.document_binding,
+    trigger_locator_digest: digestObject(triggerBinding), composer_node_id: composerNodeId, initial_text: prefix,
+  }, "source-owned native parent selection");
+  liveCanarySelections.set(tab, selection);
+  await requireLiveReplyPolicy(canary);
+  await composer.fill(action.reply_text, { timeoutMs: 5000 });
+  const ready = await inspectReadyLiveComposer(tab, action, canary);
+  const receipt = {
+    schema_version: 1, test_only: false, action_id: action.action_id,
+    intent_id: action.intent_id, session_id: action.session_id, permit_id: action.permit_id,
+    scope: action.scope, comment_fingerprint: action.comment_fingerprint,
+    reply_hash: action.reply_hash, action_digest: actionDigest(action), plan_digest: digestObject(plan),
+    observed_url: ready.observedUrl, observed_at: nowIso(),
+    baseline_exact_reply_count: 0, baseline_total_reply_count: ready.totalReplies,
+    account_verified: true, post_verified: true, target_verified: true, body_complete: true,
+    composer_empty_before_fill: false, composer_matches_reply: true, reply_control_verified: true,
+    composer_initial_state: "native_target_mention", composer_initial_text: prefix,
+    selected_parent_evidence: selection, selected_parent_evidence_digest: digestObject(selection),
+    evidence: "single-action canary: untouched editor, exact source-selected native parent, preserved native mention, exhaustive positive-count zero-own baseline",
+  };
+  receipt.preparation_id = digestObject(preparationCore(receipt));
+  return immutableJsonSnapshot(receipt, "live canary preparation");
 }
 
 async function prepareLiveReply(tab, action, plan) {
@@ -176,11 +302,17 @@ async function prepareLiveReply(tab, action, plan) {
   return immutableJsonSnapshot(receipt, "live preparation receipt");
 }
 
-async function inspectLiveFinishReceipt(tab, action, preparation, decision, attempted, dispatchError) {
+async function inspectLiveFinishReceipt(tab, action, preparation, decision, attempted, dispatchError, canary) {
   let observed;
   let inspectionError;
   try {
-    observed = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
+    if (canary) {
+      const result = await inspectLiveCanaryResult(tab, action);
+      if (result.verifiedNewReply !== true) fail("canary has no verified new native child reply");
+      observed = result;
+    } else {
+      observed = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
+    }
   } catch (error) {
     inspectionError = String(error?.message ?? error).slice(0, 500);
   }
@@ -206,13 +338,14 @@ async function inspectLiveFinishReceipt(tab, action, preparation, decision, atte
     exact_reply_visible: exactOne, own_author_verified: exactOne,
     post_submit_total_reply_count: observed?.totalReplies ?? 0,
     evidence: dispatchError ? `${evidence}; dispatch boundary error: ${dispatchError}` : evidence,
+    ...(canary && observed?.replyPermalink ? { verified_reply_permalink: observed.replyPermalink } : {}),
   }, "live browser finish receipt");
 }
 
-async function submitLiveReplyAndFinish(tab, action, plan, preparation) {
-  await requireLiveReplyPolicy();
+async function submitLiveReplyAndFinish(tab, action, plan, preparation, canary) {
+  let authorization = await requireLiveReplyPolicy(canary);
   requireCurrentReplyPermit(action);
-  const before = await inspectReadyLiveComposer(tab, action);
+  const before = await inspectReadyLiveComposer(tab, action, canary);
   if (before.observedUrl !== preparation.observed_url
       || before.totalReplies < preparation.baseline_total_reply_count) {
     fail("live reply context changed before the durable claim");
@@ -227,15 +360,16 @@ async function submitLiveReplyAndFinish(tab, action, plan, preparation) {
   // Reserve before the claim request. Even an unacknowledged claim may have
   // reached the ledger; this reservation is intentionally never released.
   liveReplyExecutionReservations.add(action.action_id);
-  const claimSubmit = createPythonLedgerClaimSubmit({ preparation });
+  const claimSubmit = createPythonLedgerClaimSubmit({ preparation, canaryContext: canary });
   if (!isPythonLedgerClaimSubmit(claimSubmit)) fail("live reply requires the default ledger bridge");
   const request = claimRequest(action, plan, preparation);
   const decision = validateWriteDecision(await claimSubmit(request), request);
+  if (canary) canary.claimId = decision.claim_id;
   let attempted = false;
   let dispatchError;
   try {
     requireCurrentReplyPermit(action);
-    const afterClaim = await inspectReadyLiveComposer(tab, action);
+    const afterClaim = await inspectReadyLiveComposer(tab, action, canary);
     if (afterClaim.observedUrl !== preparation.observed_url
         || afterClaim.totalReplies < preparation.baseline_total_reply_count) {
       fail("live reply context changed after the durable claim");
@@ -246,7 +380,7 @@ async function submitLiveReplyAndFinish(tab, action, plan, preparation) {
     if (!tab.dom_cua || typeof tab.dom_cua.click !== "function") {
       fail("live reply requires the trusted DOM-CUA submit surface");
     }
-    await requireLiveReplyPolicy();
+    authorization = await requireLiveReplyPolicy(canary);
     requireCurrentReplyPermit(action);
     attempted = true;
     await tab.dom_cua.click({ node_id: nodeId });
@@ -254,10 +388,27 @@ async function submitLiveReplyAndFinish(tab, action, plan, preparation) {
     dispatchError = String(error?.message ?? error).slice(0, 500);
   }
   const receipt = await inspectLiveFinishReceipt(
-    tab, action, preparation, decision, attempted, dispatchError,
+    tab, action, preparation, decision, attempted, dispatchError, canary,
   );
   const commit = await commitPythonLedgerBrowserReceipt(claimSubmit, "browser-finish", receipt);
-  return Object.freeze({ action_id: action.action_id, intent_id: action.intent_id, ...commit });
+  if (commit.reconcile_required) {
+    // The successful branded claim consumed this canonical lease. Keep the
+    // original source-owned bindings and the same bridge's rotated capability;
+    // never reconstruct authority from a caller or issue another submit claim.
+    const attempt = immutableJsonSnapshot({
+      action_id: action.action_id, preparation_id: preparation.preparation_id,
+      claim_id: decision.claim_id, preflight_id: decision.preflight_id,
+      attempt_session_id: action.session_id,
+      ...(canary ? {
+        canary_lease_id: authorization.lease_id,
+        canary_lease_digest: authorization.lease_digest,
+      } : {}),
+    }, "original live send attempt for private continuation");
+    const context = Object.freeze({ action, preparation, attempt, claimSubmit });
+    liveReplyRecoveryContexts.set(JSON.stringify([action.intent_id, action.session_id]), context);
+  }
+  return Object.freeze({ action_id: action.action_id, intent_id: action.intent_id, ...commit,
+    ...(canary ? { canary: true, verified_reply_permalink: receipt.verified_reply_permalink ?? null } : {}) });
 }
 
 async function executeLiveApprovedReply(rawRequest) {
@@ -280,9 +431,7 @@ async function executeLiveApprovedReply(rawRequest) {
     adapter_version: "2026-08-31.1", platform: action.scope.platform,
     target_url: targetUrl, comment_anchor: action.comment_anchor,
   }, "source-owned live reply plan");
-  const setupBrowserRuntime = await loadSetupBrowserRuntime();
-  const agent = await setupBrowserRuntime();
-  const browser = await agent.browsers.get("chrome");
+  const browser = await getSourceOwnedChromeBrowser();
   const tab = await browser.tabs.new();
   try {
     bindLiveReplyBrowser(tab, browser);
@@ -298,6 +447,45 @@ async function executeLiveApprovedReply(rawRequest) {
       // Cleanup uncertainty never causes a second claim or submission attempt.
     }
   }
+}
+
+async function executeLiveCanaryReply(rawRequest) {
+  const request = immutableJsonSnapshot(rawRequest, "single-action canary request");
+  const keys = ["intentId", "sessionId", "leaseId"];
+  if (!request || typeof request !== "object" || Array.isArray(request)
+      || Object.keys(request).length !== keys.length || keys.some((key) => !Object.hasOwn(request, key))) {
+    fail("executeCanaryReply accepts only intentId, sessionId and leaseId");
+  }
+  for (const key of keys) requiredString(request[key], `canary request.${key}`);
+  const action = await readApprovedReplyAction(request.intentId, request.sessionId, request.leaseId);
+  if (action.scope.platform !== "instagram") fail("single-action live canary currently supports only the verified Instagram native shape");
+  const canary = { ...request, action };
+  liveCanaryContexts.add(canary);
+  await requireLiveReplyPolicy(canary);
+  if (liveReplyExecutionReservations.has(action.action_id)) fail("live canary action has already been reserved");
+  const plan = immutableJsonSnapshot({ schema_version: 1, adapter_id: "source-owned-instagram-single-action-canary",
+    adapter_version: LIVE_REPLY_ADAPTER_VERSION, platform: action.scope.platform,
+    target_url: liveReplyUrl(action), comment_anchor: action.comment_anchor,
+  }, "single-action native canary plan");
+  const browser = await getSourceOwnedChromeBrowser();
+  const tab = await browser.tabs.new();
+  try {
+    bindLiveReplyBrowser(tab, browser);
+    await tab.goto(plan.target_url);
+    await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
+    await waitForNativeParent(tab, action.comment_anchor.comment_permalink);
+    const preparation = await prepareLiveCanaryReply(tab, action, plan, canary);
+    return await submitLiveReplyAndFinish(tab, action, plan, preparation, canary);
+  } finally {
+    liveCanarySelections.delete(tab);
+    try { await Promise.race([tab.close(), new Promise((resolve) => setTimeout(resolve, 2000))]); } catch { /* no retry */ }
+  }
+}
+
+async function waitForNativeParent(tab, permalink) {
+  const path = `${new URL(permalink).pathname.replace(/\/$/u, "")}/`;
+  await tab.playwright.locator(`article a[href=${JSON.stringify(path)}]`)
+    .waitFor({ state: "visible", timeoutMs: 15000 });
 }
 
 async function readLiveRecoveryAction(intentId, sessionId) {
@@ -355,6 +543,12 @@ async function readLiveRecoveryAction(intentId, sessionId) {
     }
   }
   for (const key of ["claim_id", "preflight_id"]) requiredString(attempt[key], `recovery ${key}`);
+  if (Object.hasOwn(attempt, "canary_lease_id") || Object.hasOwn(attempt, "canary_lease_digest")) {
+    if (!/^[0-9a-f]{32}$/u.test(attempt.canary_lease_id ?? "")
+        || !/^[0-9a-f]{64}$/u.test(attempt.canary_lease_digest ?? "")) {
+      fail("recovery canary attempt has no complete canonical lease binding");
+    }
+  }
   if (!Number.isSafeInteger(preparation.baseline_total_reply_count)
       || preparation.baseline_total_reply_count < 0) {
     fail("recovery original reply baseline is invalid");
@@ -381,6 +575,7 @@ function liveRecoveryRequest(rawRequest, allowReason) {
 
 async function inspectLiveReinspectionReceipt(tab, context, sessionId) {
   const { action, preparation, attempt } = context;
+  if (attempt.canary_lease_id) return inspectCanaryReinspectionReceipt(tab, context, sessionId);
   const first = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
   const observed = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
   for (const key of ["observedUrl", "totalReplies", "ownReplyCount", "exactOwnCount"]) {
@@ -408,14 +603,51 @@ async function inspectLiveReinspectionReceipt(tab, context, sessionId) {
   }, "live reconcile receipt");
 }
 
+async function inspectCanaryReinspectionReceipt(tab, context, sessionId) {
+  const { action, preparation, attempt } = context;
+  let observed;
+  let detail = "no positive native reply confirmation";
+  try {
+    const first = await prepareLiveReplyThread(tab, action);
+    const second = await inspectLiveReplySurface(tab, action, "after");
+    if (!first.exhaustiveThread || !second.exhaustiveThread
+        || digestObject(first.replyExhaustionCandidate.document_binding)
+          !== digestObject(second.replyExhaustionCandidate.document_binding)
+        || first.totalReplies !== second.totalReplies
+        || second.ownReplyCount !== 1 || second.exactOwnCount !== 1
+        || second.totalReplies < preparation.baseline_total_reply_count + 1) {
+      fail("canary recovery found no unique approved own reply in the native target thread");
+    }
+    observed = second;
+    detail = "fresh native target expansion and two stable reads confirm the original canary's exact own reply; no submit or absence inference";
+  } catch (error) {
+    detail = `canary recovery remains unknown: ${String(error?.message ?? error).slice(0, 500)}`;
+  }
+  const positive = Boolean(observed);
+  return immutableJsonSnapshot({
+    schema_version: 1, test_only: false,
+    action_id: action.action_id, intent_id: action.intent_id, session_id: sessionId,
+    attempt_session_id: attempt.attempt_session_id, scope: action.scope,
+    comment_fingerprint: action.comment_fingerprint, reply_hash: action.reply_hash,
+    preparation_id: preparation.preparation_id, claim_id: attempt.claim_id, preflight_id: attempt.preflight_id,
+    observed_url: observed?.observedUrl ?? preparation.observed_url ?? liveReplyUrl(action), observed_at: nowIso(),
+    account_verified: positive, post_verified: positive, target_verified: positive, parent_verified: positive,
+    exact_reply_visible: positive, own_author_verified: positive, absence_verified: false,
+    own_author_reply_count: observed?.ownReplyCount ?? 0,
+    reinspection_total_reply_count: observed?.totalReplies ?? 0, evidence: detail,
+  }, "positive-only canary recovery receipt");
+}
+
 async function withPrivateRecoveryTab(context, inspect) {
-  const setupBrowserRuntime = await loadSetupBrowserRuntime();
-  const agent = await setupBrowserRuntime();
-  const browser = await agent.browsers.get("chrome");
+  const browser = await getSourceOwnedChromeBrowser();
   const tab = await browser.tabs.new();
   try {
     bindLiveReplyBrowser(tab, browser);
     await tab.goto(liveReplyUrl(context.action));
+    if (context.attempt.canary_lease_id) {
+      await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
+      await waitForNativeParent(tab, context.action.comment_anchor.comment_permalink);
+    }
     return await inspect(tab);
   } finally {
     try {
@@ -428,7 +660,7 @@ async function withPrivateRecoveryTab(context, inspect) {
 
 async function commitLiveReinspection(tab, context, request) {
   const receipt = await inspectLiveReinspectionReceipt(tab, context, request.sessionId);
-  await requireLiveReplyPolicy();
+  if (!context.attempt.canary_lease_id) await requireLiveReplyPolicy();
   const commit = await commitPythonLedgerBrowserReceipt(
     context.claimSubmit, "browser-reconcile", receipt,
   );
@@ -443,15 +675,19 @@ async function recoverLiveApprovedReply(rawRequest) {
   }
   liveReplyRecoveryInFlight.add(request.key);
   try {
-    await requireLiveReplyPolicy();
     const original = await readLiveRecoveryAction(request.intentId, request.sessionId);
+    if (!original.attempt.canary_lease_id) await requireLiveReplyPolicy();
     const claimSubmit = createPythonLedgerClaimSubmit({ preparation: original.preparation });
     if (!isPythonLedgerClaimSubmit(claimSubmit)) fail("live recovery requires the default ledger bridge");
     const context = Object.freeze({ ...original, claimSubmit });
     return await withPrivateRecoveryTab(context, async (tab) => {
       // Inspect before rotating authority, then inspect afresh before committing.
-      requireCompleteLiveSurface(await inspectLiveReplySurface(tab, original.action, "after"));
-      await requireLiveReplyPolicy();
+      if (original.attempt.canary_lease_id) {
+        await inspectCanaryReinspectionReceipt(tab, context, request.sessionId);
+      } else {
+        requireCompleteLiveSurface(await inspectLiveReplySurface(tab, original.action, "after"));
+        await requireLiveReplyPolicy();
+      }
       const recovered = await recoverPythonLedgerReconcile(claimSubmit, request);
       if (recovered.attempt_session_id !== original.attempt.attempt_session_id) {
         fail("live recovery changed the original attempt session");
@@ -471,7 +707,7 @@ async function reconcileLiveUncertainReply(rawRequest) {
   if (liveReplyRecoveryInFlight.has(request.key)) fail("live recovery is already in flight");
   liveReplyRecoveryInFlight.add(request.key);
   try {
-    await requireLiveReplyPolicy();
+    if (!context.attempt.canary_lease_id) await requireLiveReplyPolicy();
     return await withPrivateRecoveryTab(context, (tab) => commitLiveReinspection(tab, context, request));
   } finally {
     liveReplyRecoveryInFlight.delete(request.key);
@@ -500,13 +736,14 @@ function collect(stream, child, label) {
 
 async function runPythonClaim({
   pythonCommand = "python", scriptPath = DEFAULT_SCRIPT, root, intentId, sessionId,
-  preparation, spawnImpl = spawn, timeoutMs = 15000,
+  preparation, canaryLeaseId, spawnImpl = spawn, timeoutMs = 15000,
 }) {
   const args = [
     requiredString(scriptPath, "claim bridge scriptPath"),
     "browser-begin", "-", "--intent-id", requiredString(intentId, "claim bridge intentId"),
     "--session-id", requiredString(sessionId, "claim bridge sessionId"),
   ];
+  if (canaryLeaseId !== undefined) args.push("--canary-lease-id", requiredString(canaryLeaseId, "canary lease id"));
   if (root !== undefined) args.push("--root", requiredString(root, "claim bridge root"));
   args.push("--write");
   const child = spawnImpl(requiredString(pythonCommand, "claim bridge pythonCommand"), args, {
@@ -553,7 +790,8 @@ async function runPythonScanRequest({
     fail("scan bridge ttl_minutes must be a positive integer");
   }
   const args = [
-    requiredString(scriptPath, "scan bridge scriptPath"), "browser-scan-request",
+    requiredString(scriptPath, "scan bridge scriptPath"),
+    target.observation_scope === "target_comment" ? "browser-target-observation-request" : "browser-scan-request",
     "--platform", requiredString(target.platform, "scan target.platform"),
     "--account-key", requiredString(target.account_key, "scan target.account_key"),
     "--post-key", requiredString(target.post_key, "scan target.post_key"),
@@ -561,6 +799,10 @@ async function runPythonScanRequest({
     "--session-id", requiredString(target.session_id, "scan target.session_id"),
     "--ttl-minutes", String(ttlMinutes), "--internal-fused",
   ];
+  if (target.observation_scope === "target_comment") args.push(
+    "--platform-comment-id", requiredString(target.platform_comment_id, "target platform comment id"),
+    "--comment-permalink", requiredString(target.comment_permalink, "target comment permalink"),
+  );
   if (root !== undefined) args.push("--root", requiredString(root, "scan bridge root"));
   args.push("--write");
   const child = spawnImpl(requiredString(pythonCommand, "scan bridge pythonCommand"), args, {
@@ -604,7 +846,8 @@ async function runPythonScanCommit({
   spawnImpl = spawn, timeoutMs = 15000,
 }) {
   const args = [
-    requiredString(scriptPath, "scan commit bridge scriptPath"), "browser-scan", "-",
+    requiredString(scriptPath, "scan commit bridge scriptPath"),
+    request.observation_scope === "target_comment" ? "browser-target-observation" : "browser-scan", "-",
     "--scan-request-id", requiredString(
       request.scan_request_id, "scan request.scan_request_id",
     ),
@@ -638,11 +881,12 @@ async function runPythonScanCommit({
     const detail = stderr.trim().slice(0, 1000) || `exit code ${code}`;
     fail(`durable scan commit failed: ${detail}`);
   }
+  const marker = request.observation_scope === "target_comment" ? "TARGET_OBSERVATION_COMMIT " : "SCAN_COMMIT ";
   const lines = stdout.split(/\r?\n/u)
-    .filter((line) => line.startsWith("SCAN_COMMIT "));
+    .filter((line) => line.startsWith(marker));
   if (lines.length !== 1) fail("durable scan commit returned no unique receipt");
   try {
-    return JSON.parse(lines[0].slice("SCAN_COMMIT ".length));
+    return JSON.parse(lines[0].slice(marker.length));
   } catch {
     fail("durable scan commit returned malformed JSON");
   }
@@ -880,10 +1124,14 @@ async function recoverPythonLedgerReconcile(claimSubmit, request) {
 }
 
 export function createPythonLedgerClaimSubmit({
-  preparation, pythonCommand = "python", scriptPath = DEFAULT_SCRIPT, root,
+  preparation, canaryLeaseId, canaryContext, pythonCommand = "python", scriptPath = DEFAULT_SCRIPT, root,
   runner = runPythonClaim, receiptRunner = runPythonReceipt,
   recoveryRunner = runPythonRecovery, timeoutMs = 15000,
 } = {}) {
+  if (canaryLeaseId !== undefined) fail("public claim bridge cannot accept a canary lease string");
+  if (canaryContext !== undefined && !liveCanaryContexts.has(canaryContext)) {
+    fail("canary claim requires its source-owned execution context");
+  }
   let durableClaim;
   let finishCapability;
   let reconcileCapability;
@@ -894,7 +1142,7 @@ export function createPythonLedgerClaimSubmit({
     assertRequestMatchesPreparation(request, preparation);
     const decision = await runner({
       pythonCommand, scriptPath, root, intentId: request.intent_id,
-      sessionId: request.session_id, preparation, timeoutMs,
+      sessionId: request.session_id, preparation, canaryLeaseId: canaryContext?.leaseId, timeoutMs,
     });
     if (!decision || typeof decision !== "object") fail("claim bridge decision must be an object");
     for (const key of [
@@ -1122,6 +1370,80 @@ function createScanAndCommit(scanPost, {
   };
 }
 
+async function observeLiveTargetComment(rawTarget) {
+  const raw = immutableJsonSnapshot(rawTarget, "native target observation request");
+  const allowed = new Set(["platform", "account_key", "post_key", "post_permalink", "session_id",
+    "ttl_minutes", "platform_comment_id", "comment_permalink"]);
+  if (!raw || Array.isArray(raw) || Object.keys(raw).some((key) => !allowed.has(key))) {
+    fail("target observation accepts only exact target identity, session and expiry");
+  }
+  const target = Object.freeze({ ...normalizeScanTarget({ ...raw,
+    post_permalink: canonicalUrl(raw.post_permalink).toString(),
+  }), observation_scope: "target_comment",
+    platform_comment_id: requiredString(raw.platform_comment_id, "target platform_comment_id"),
+    comment_permalink: canonicalUrl(requiredString(raw.comment_permalink, "target comment_permalink")).toString(),
+  });
+  if (target.platform !== "instagram") fail("native target intake currently supports only Instagram");
+  const authorized = validateScanAuthorization(await runPythonScanRequest({ target }), target);
+  const request = authorized.request;
+  if (request.observation_scope !== "target_comment"
+      || request.target?.platform_comment_id !== target.platform_comment_id
+      || new URL(request.target.comment_permalink).href.replace(/\/$/u, "")
+        !== new URL(target.comment_permalink).href.replace(/\/$/u, "")) {
+    fail("native observation authorization target differs");
+  }
+  const sourceTarget = {
+    platform: request.platform, account_key: request.account_key, post_key: request.post_key,
+    post_permalink: request.post_permalink, ...request.target,
+  };
+  const browser = await getSourceOwnedChromeBrowser();
+  const tab = await browser.tabs.new();
+  try {
+    await tab.goto(request.target.comment_permalink);
+    await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
+    await waitForNativeParent(tab, request.target.comment_permalink);
+    const first = await readLiveTargetComment(tab, sourceTarget);
+    const second = await readLiveTargetComment(tab, sourceTarget);
+    if (digestObject(first.documentBinding) !== digestObject(second.documentBinding) || first.observedUrl !== second.observedUrl
+        || digestObject(first.comment) !== digestObject(second.comment)) {
+      fail("native target changed across its two scoped observations");
+    }
+    const normalizeComment = (comment) => ({ ...comment,
+      comment_permalink: request.target.comment_permalink,
+      observed_parent_post_permalink: canonicalUrl(comment.observed_parent_post_permalink).toString(),
+      language: comment.language ?? "und",
+    });
+    const comment = normalizeComment(second.comment);
+    const firstDigest = digestObject(normalizeComment(first.comment));
+    const secondDigest = digestObject(comment);
+    const receipt = immutableJsonSnapshot({
+      schema_version: 1, test_only: false, observation_scope: "target_comment",
+      scan_request_id: request.scan_request_id, session_id: request.session_id,
+      platform: request.platform, account_key: request.account_key, post_key: request.post_key,
+      post_permalink: request.post_permalink, observed_url: second.observedUrl, observed_at: nowIso(),
+      authentication_state: "authenticated", account_verified: true, post_verified: true, target_verified: true,
+      comment, observation_evidence: {
+        schema_version: 1, adapter_id: "source-owned-instagram-native-target",
+        adapter_version: LIVE_REPLY_ADAPTER_VERSION, document_binding: second.documentBinding,
+        stable_read_count: 2, first_read_digest: firstDigest, second_read_digest: secondDigest,
+      },
+    }, "source-owned native target observation");
+    const committed = await runPythonScanCommit({ request,
+      envelope: { provenance: authorized.capability, receipt },
+    });
+    if (committed.operation !== "browser-target-observation"
+        || committed.scan_request_id !== request.scan_request_id
+        || committed.receipt_digest !== digestObject(receipt)
+        || committed.observation_scope !== "target_comment" || committed.comment_count !== 1
+        || committed.whole_post_complete !== false || committed.reply_thread_complete !== false) {
+      fail("native observation commit differs from the exact source receipt");
+    }
+    return immutableJsonSnapshot(committed, "target-only intake result");
+  } finally {
+    try { await Promise.race([tab.close(), new Promise((resolve) => setTimeout(resolve, 2000))]); } catch { /* no repeat */ }
+  }
+}
+
 export function createCommentChromeActuator(options = {}) {
   const claimSubmit = options.claimSubmit;
   const defaultLiveExecution = Object.keys(options).length === 0;
@@ -1137,6 +1459,16 @@ export function createCommentChromeActuator(options = {}) {
       fail("executeApprovedReply rejects custom actuator options and callbacks");
     }
     return executeLiveApprovedReply(request);
+  }
+
+  async function executeCanaryReply(request) {
+    if (!defaultLiveExecution) fail("executeCanaryReply rejects custom actuator options and callbacks");
+    return executeLiveCanaryReply(request);
+  }
+
+  async function observeTargetComment(request) {
+    if (!defaultLiveExecution) fail("observeTargetComment rejects custom actuator options and callbacks");
+    return observeLiveTargetComment(request);
   }
 
   async function recoverApprovedReply(request) {
@@ -1207,6 +1539,8 @@ export function createCommentChromeActuator(options = {}) {
     scanPost,
     scanAndCommit,
     executeApprovedReply,
+    executeCanaryReply,
+    observeTargetComment,
     recoverApprovedReply,
     reconcileUncertainReply,
     prepareReply: send.prepareReply,

@@ -35,7 +35,7 @@ def build_scan_capability_binding(request: dict[str, Any]) -> dict[str, Any]:
         key: _required_string(request, key, "browser scan request")
         for key in ("platform", "account_key", "post_key", "post_permalink")
     }
-    return {
+    binding = {
         "provenance_version": SCAN_CAPABILITY_VERSION,
         "operation": SCAN_CAPABILITY_OPERATION,
         "scan_request_id": _required_string(
@@ -52,6 +52,10 @@ def build_scan_capability_binding(request: dict[str, Any]) -> dict[str, Any]:
         ),
         "scope": scope,
     }
+    if request.get("observation_scope") == "target_comment":
+        binding["observation_scope"] = "target_comment"
+        binding["target"] = request["target"]
+    return binding
 
 
 def _scan_secret_hash(capability_id: str, binding_digest: str, nonce: str) -> str:
@@ -151,6 +155,16 @@ def _require_scan_receipt_binding(
         raise ValueError("browser-scan receipt session differs from its stored scan request")
     if supplied_scope != expected_scope:
         raise ValueError("browser-scan receipt scope differs from its stored scan request")
+    if request.get("observation_scope") == "target_comment":
+        if receipt.get("observation_scope") != "target_comment":
+            raise ValueError("target observation receipt cannot become a whole-post scan")
+        comment = receipt.get("comment")
+        if not isinstance(comment, dict) or any(
+            comment.get(key) != value for key, value in request["target"].items()
+        ):
+            raise ValueError("target observation receipt differs from its exact target")
+    elif receipt.get("observation_scope") == "target_comment":
+        raise ValueError("whole-post scan capability cannot authorize a target observation")
 
 
 def consume_scan_receipt_envelope(
@@ -390,6 +404,37 @@ def build_scan_provenance(
     return {**core, "provenance_digest": _json_digest(core)}
 
 
+def build_target_observation_provenance(
+    raw: dict[str, Any], *, scan_id: str, scope: dict[str, str],
+    target: dict[str, str], comment: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind exactly one visible parent; never mint exhaustion or send authority."""
+    evidence = raw["observation_evidence"]
+    core = {
+        "schema_version": 1,
+        "evidence_scope": "target_comment_receipt_continuity_only",
+        "observation_scope": "target_comment",
+        "whole_post_complete": False,
+        "reply_thread_complete": False,
+        "capability_promotion_eligible": False,
+        "full_lifecycle_bound": False,
+        "test_only": False,
+        "scan_request_id": raw["scan_request_id"],
+        "scan_id": scan_id,
+        "scan_receipt_digest": _json_digest(raw),
+        "scope": dict(scope),
+        "target": dict(target),
+        "observed_url": target["comment_permalink"],
+        "observed_at": raw["observed_at"],
+        "comment_fingerprints_digest": _json_digest([comment["raw_fingerprint"]]),
+        "adapter_id": evidence["adapter_id"],
+        "adapter_version": evidence["adapter_version"],
+        "target_observation_digest": _json_digest(evidence),
+        "own_reply_absence_proven": False,
+    }
+    return {**core, "provenance_digest": _json_digest(core)}
+
+
 def validate_scan_provenance(value: Any) -> dict[str, Any]:
     """Validate a durable provenance envelope without granting any capability."""
     if not isinstance(value, dict):
@@ -397,7 +442,10 @@ def validate_scan_provenance(value: Any) -> dict[str, Any]:
     version = value.get("schema_version")
     if not isinstance(version, int) or isinstance(version, bool) or version != 1:
         raise ValueError("scan_provenance schema_version must be integer 1")
-    if value.get("evidence_scope") != "scan_receipt_continuity_only":
+    target_only = value.get("evidence_scope") == "target_comment_receipt_continuity_only"
+    if value.get("evidence_scope") not in {
+        "scan_receipt_continuity_only", "target_comment_receipt_continuity_only",
+    }:
         raise ValueError("scan_provenance evidence_scope is invalid")
     if value.get("capability_promotion_eligible") is not False:
         raise ValueError("scan_provenance cannot claim capability promotion eligibility")
@@ -405,15 +453,35 @@ def validate_scan_provenance(value: Any) -> dict[str, Any]:
         raise ValueError("scan_provenance cannot claim full lifecycle mapping")
     if not isinstance(value.get("test_only"), bool):
         raise ValueError("scan_provenance test_only must be explicit boolean")
-    for key in (
+    strings = [
         "scan_request_id", "scan_id", "observed_url", "observed_at",
-        "adapter_id", "adapter_version", "mapping_coverage",
-    ):
+        "adapter_id", "adapter_version",
+    ]
+    digests = ["scan_receipt_digest", "comment_fingerprints_digest", "provenance_digest"]
+    if target_only:
+        if value.get("observation_scope") != "target_comment":
+            raise ValueError("target provenance observation_scope is invalid")
+        for key in ("whole_post_complete", "reply_thread_complete", "own_reply_absence_proven"):
+            if value.get(key) is not False:
+                raise ValueError(f"target provenance cannot claim {key}")
+        if any(key in value for key in ("exhaustion_digest", "reply_exhaustion_digest", "mapping_digest")):
+            raise ValueError("target provenance cannot contain whole-scan exhaustion or mapping")
+        target = value.get("target")
+        if not isinstance(target, dict) or set(target) != {"platform_comment_id", "comment_permalink"}:
+            raise ValueError("target provenance requires exact native target")
+        for key in target:
+            _required_string(target, key, "target provenance")
+        if value["observed_url"] != target["comment_permalink"]:
+            raise ValueError("target provenance observed URL differs from target")
+        digests.append("target_observation_digest")
+    else:
+        if "observation_scope" in value or "target" in value:
+            raise ValueError("whole-scan provenance cannot be relabeled target-only")
+        strings.append("mapping_coverage")
+        digests.extend(("mapping_digest", "exhaustion_digest", "reply_exhaustion_digest"))
+    for key in strings:
         _required_string(value, key, "scan_provenance")
-    for key in (
-        "scan_receipt_digest", "comment_fingerprints_digest", "mapping_digest",
-        "exhaustion_digest", "reply_exhaustion_digest", "provenance_digest",
-    ):
+    for key in digests:
         _required_digest(value, key, "scan_provenance")
     scope = value.get("scope")
     if not isinstance(scope, dict):
@@ -436,6 +504,14 @@ def comment_scan_provenance_digest(comment: dict[str, Any]) -> str | None:
     expected = clean["provenance_digest"]
     if supplied != expected:
         raise ValueError("comment scan provenance digest differs from its envelope")
+    if clean.get("observation_scope") == "target_comment":
+        if clean["target"] != {
+            "platform_comment_id": comment.get("platform_comment_id"),
+            "comment_permalink": comment.get("comment_permalink"),
+        }:
+            raise ValueError("target provenance differs from comment identity")
+        if clean["comment_fingerprints_digest"] != _json_digest([comment.get("raw_fingerprint")]):
+            raise ValueError("target provenance differs from comment fingerprint")
     return expected
 
 

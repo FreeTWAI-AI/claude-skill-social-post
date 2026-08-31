@@ -21,6 +21,8 @@ from comment_authorization import (
 from comment_browser_provenance import (
     validate_capability_metadata_shape, validate_consumption_shape,
 )
+from comment_canary import CANARY_EVENT, apply_canary_lease, consume_canary_for_attempt
+from comment_browser_send_contract import _browser_action_from_ledger
 from comment_identity import (
     IDENTITY_CONFIDENCE,
     PLATFORMS,
@@ -75,6 +77,7 @@ def normalize_reply_event(
         result.get(SCAN_PROVENANCE_DIGEST_FIELD),
         result.get(DRAFT_PROVENANCE_DIGEST_FIELD),
         result.get(ACTION_PROVENANCE_DIGEST_FIELD),
+        *((result.get("canary_lease", {}).get("lease_id"),) if event_type == CANARY_EVENT else ()),
     )
     return result
 
@@ -210,6 +213,10 @@ def _apply_send_started(
     _validate_send_comment(row, draft, comment, label, errors)
     if row.get("scope") != permit.get("scope"):
         errors.append(f"{label} send scope differs from approval")
+    try:
+        consume_canary_for_attempt(current, row)
+    except ValueError as exc:
+        errors.append(f"{label} {exc}")
     current.update(
         status="send_started", last_event=row, attempt=row, permit=None,
         reconcile_capability=None,
@@ -356,7 +363,16 @@ def _apply_reply_transition(
     label: str, errors: list[str], warnings: list[str],
 ) -> None:
     event_type = row.get("event_type")
-    if event_type == "approved":
+    if event_type == CANARY_EVENT:
+        try:
+            comment = _comment_at(observations, comment_key, row["occurred_at"])
+            if comment is None:
+                raise ValueError("canary lease has no canonical comment observation")
+            action = _browser_action_from_ledger(comment, current, row["intent_id"], row["session_id"])
+            apply_canary_lease(current, row, action)
+        except ValueError as exc:
+            errors.append(f"{label} {exc}")
+    elif event_type == "approved":
         _apply_approval(current, row, comment_key, observations, grants, label, errors)
     elif event_type == "send_started":
         _apply_send_started(current, row, comment_key, observations, label, errors)
@@ -438,6 +454,7 @@ def _apply_draft(
         "status": "drafted", "intent_id": intent_id, "draft": row,
         "last_event": row, "permit": None, "attempt": None,
         "reconcile_capability": None,
+        "canary_lease": None,
     }
 
 
@@ -474,6 +491,7 @@ def replay_reply_events(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     seen_audits: set[str] = set()
     seen_permits: set[str] = set()
+    seen_canary_leases: set[str] = set()
     observations = _observations_by_comment(comment_rows)
     states: dict[str, dict[str, Any]] = {}
     grants: dict[str, dict[str, Any]] = {}
@@ -486,6 +504,12 @@ def replay_reply_events(
         _record_audit_id(row, label, seen_audits, errors)
         if shape_invalid:
             continue
+        if row.get("event_type") == CANARY_EVENT:
+            lease_id = row["canary_lease"]["lease_id"]
+            if lease_id in seen_canary_leases:
+                errors.append(f"{label} duplicate canary lease ID")
+                continue
+            seen_canary_leases.add(lease_id)
         if row.get("event_type") in GRANT_EVENT_TYPES:
             apply_grant_event(grants, row, label, errors, maximum_actions_limit)
             continue

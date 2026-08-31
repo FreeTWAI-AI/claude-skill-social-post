@@ -221,7 +221,9 @@ assert.ok(captureStart >= 0 && captureEnd > captureStart);
 const captureSource = runtimeSource.slice(captureStart, captureEnd);
 const otherRuntimeSource = runtimeSource.slice(0, captureStart) + runtimeSource.slice(captureEnd);
 assert.match(captureSource, /const expectedUrl = approvedPermalink\(rawTarget\);/u);
-assert.match(captureSource, /const browser = await agent\.browsers\.get\("chrome"\);/u);
+assert.match(captureSource, /const browser = await getSourceOwnedChromeBrowser\(\);/u);
+assert.equal((runtimeSource.match(/agent\.browsers\.get\("chrome"\)/gu) ?? []).length, 1,
+  "a persistent source runtime selects Chrome once, never once per tab");
 assert.match(captureSource, /const tab = await browser\.tabs\.new\(\);\s*try\s*\{\s*await tab\.goto\(expectedUrl\);/u);
 assert.deepEqual(
   runtimeSource.match(/\.(?:goto|reload|back|forward)\s*\([^)]*\)/gu),

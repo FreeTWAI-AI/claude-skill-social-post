@@ -166,10 +166,15 @@ async function readStableSubmitIdentity(locator) {
       if (element.hasAttribute(name) && value !== null && value !== "") attributes[name] = value;
     }
     const booleans = input.booleans.filter((name) => element.hasAttribute(name));
-    const text = String(element.innerText ?? element.textContent ?? "")
+    const tag = String(element.tagName ?? "").toLowerCase();
+    const visibleText = tag === "textarea" ? element.value : (element.innerText ?? element.textContent ?? "");
+    if (tag === "textarea" && typeof visibleText !== "string") {
+      throw new Error("textarea current value is unavailable for stable-node binding");
+    }
+    const text = String(visibleText)
       .normalize("NFC").replace(/\s+/gu, " ").trim().slice(0, 160);
     return {
-      tag: String(element.tagName ?? "").toLowerCase(),
+      tag,
       attributes,
       booleans,
       text,
@@ -376,7 +381,7 @@ export async function bindStableSubmitNode(
 }
 
 export function preparationCore(receipt) {
-  return {
+  const core = {
     action_digest: receipt.action_digest,
     plan_digest: receipt.plan_digest,
     observed_url: receipt.observed_url,
@@ -385,6 +390,11 @@ export function preparationCore(receipt) {
     baseline_total_reply_count: receipt.baseline_total_reply_count,
     test_only: receipt.test_only,
   };
+  if (Object.hasOwn(receipt, "composer_initial_state")) {
+    for (const key of ["composer_initial_state", "composer_initial_text",
+      "selected_parent_evidence", "selected_parent_evidence_digest"]) core[key] = receipt[key];
+  }
+  return core;
 }
 
 export function validatePreparation(raw, action, plan, options) {
