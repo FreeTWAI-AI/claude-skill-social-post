@@ -18,6 +18,7 @@ from comment_browser_provenance import (
     build_receipt_binding, consume_receipt_envelope, issue_receipt_capability,
     issue_reconcile_receipt_capability, reconcile_receipt_binding_from_issuer,
 )
+from comment_browser_send_contract import build_browser_recovery_action
 from comment_cli_support import (
     SKILL_ROOT, commit_or_preview, load_state, now_iso, read_json_source, require_valid,
 )
@@ -35,7 +36,15 @@ def _require_live_browser_mutation_enabled(
     policy: dict[str, Any], args: argparse.Namespace, operation: str,
 ) -> None:
     """Fail closed before a live Chrome receipt can mutate the canonical ledger."""
-    if args.write and policy.get("live_browser_actuation_enabled") is not True:
+    scan_only_enabled = (
+        operation == "browser-scan"
+        and policy.get("live_browser_scan_enabled") is True
+    )
+    if (
+        args.write
+        and policy.get("live_browser_actuation_enabled") is not True
+        and not scan_only_enabled
+    ):
         raise ValueError(
             f"{operation} live browser ledger mutation is disabled by policy"
         )
@@ -165,6 +174,17 @@ def command_browser_action(args: argparse.Namespace) -> None:
         args.intent_id, args.session_id,
     )
     print(json.dumps(action, ensure_ascii=False, indent=2))
+
+
+def command_browser_recovery_action(args: argparse.Namespace) -> None:
+    """Read original uncertain-send bindings; never issue a submit or capability."""
+    records, _policy, result = load_state(args.root)
+    require_valid(result)
+    recovery = build_browser_recovery_action(
+        result["latest_comments"], result["reply_states"], args.intent_id, args.session_id,
+        reply_rows=records["replies"],
+    )
+    print(json.dumps(recovery, ensure_ascii=False, indent=2))
 
 
 def command_browser_begin(args: argparse.Namespace) -> None:
@@ -494,6 +514,12 @@ def register_browser_commands(sub: argparse._SubParsersAction) -> None:
     action.add_argument("--session-id", required=True)
     _add_root(action, write=False)
     action.set_defaults(handler=command_browser_action)
+
+    recovery_action = sub.add_parser("browser-recovery-action")
+    recovery_action.add_argument("--intent-id", required=True)
+    recovery_action.add_argument("--session-id", required=True)
+    _add_root(recovery_action, write=False)
+    recovery_action.set_defaults(handler=command_browser_recovery_action)
 
     begin = sub.add_parser("browser-begin")
     begin.add_argument("source", help="fresh structured Chrome preflight JSON file or -")

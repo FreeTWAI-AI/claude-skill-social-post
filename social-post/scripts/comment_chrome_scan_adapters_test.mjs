@@ -288,9 +288,12 @@ const productionVersions = productionAdapters.trustedPlatformAdapterVersions();
 assert.deepEqual(Object.keys(productionVersions).sort(), ["facebook", "instagram", "threads"]);
 assert.equal(
   productionVersions.instagram.live_status,
-  "unavailable_pending_authenticated_canary_and_live_locator_revision",
+  "source_wired_accessibility_snapshot_permalink_identity",
 );
-assert.equal(productionVersions.instagram.live, null);
+assert.deepEqual(productionVersions.instagram.live, {
+  id: "meta-accessibility-snapshot",
+  version: "2026-08-30.1",
+});
 const productionHostResolver = productionVersions.instagram.trusted_host_resolver;
 assert.equal(productionHostResolver.schema_version, 2);
 assert.equal(productionHostResolver.resolver_version, "2026-08-30.1");
@@ -302,9 +305,18 @@ assert.equal(productionHostResolver.frame_policy, "main-frame-only");
 assert.equal(productionHostResolver.document_epoch, "readonly-performance-time-origin");
 assert.equal(productionHostResolver.caller_authority_inputs, false);
 assert.equal(productionHostResolver.runtime.existing_session_only, true);
+assert.equal(productionHostResolver.runtime.trusted_node_repl_required, true);
+assert.equal(productionHostResolver.runtime.exact_fresh_open_tabs_object_required, false);
+assert.equal(productionHostResolver.runtime.bounded_process_owned_tab, true);
+assert.equal(productionHostResolver.runtime.raw_tab_exposed, false);
 assert.equal(productionHostResolver.runtime.can_launch_browser, false);
-assert.equal(productionHostResolver.runtime.can_navigate, false);
+assert.equal(productionHostResolver.runtime.can_navigate, true);
+assert.equal(
+  productionHostResolver.runtime.navigation_scope,
+  "one exact trusted post permalink per read operation",
+);
 assert.equal(productionHostResolver.runtime.can_mutate_page, false);
+assert.equal(productionHostResolver.runtime.can_read_browser_storage, false);
 assert.equal(productionHostResolver.live_scan_plan_minting, false);
 assert.equal(productionHostResolver.live_send_enabled, false);
 assert.deepEqual(productionVersions.instagram.stable_node_frame_mapping, {
@@ -322,8 +334,12 @@ assert.throws(
   () => productionAdapters.createTrustedPlatformScanPlan("instagram", {
     tab: new FakeTab({ selectors: {}, nodes: {}, countCalls: {} }),
   }),
-  /no authenticated-canary-verified live instagram locator revision is available/u,
+  /rejects caller authority input tab/u,
 );
+const liveProductionPlan = productionAdapters.createTrustedPlatformScanPlan("instagram");
+assert.equal(productionAdapters.isTrustedPlatformScanPlan(liveProductionPlan), true);
+assert.equal(Object.isFrozen(liveProductionPlan), true);
+assert.equal(productionAdapters.isTrustedPlatformScanPlan(structuredClone(liveProductionPlan)), false);
 assert.throws(
   () => productionAdapters.createTrustedPlatformScanPlan("unknown"),
   /no registered scan adapter platform unknown/u,

@@ -5,6 +5,7 @@ export const SCHEMA_VERSION = 1;
 
 export const INVENTORY_SCOPE = Object.freeze([
   "scripts/comment_chrome_*.mjs",
+  "scripts/comment_meta_snapshot_parser.mjs",
   "scripts/comment_js_architecture_*.mjs",
   "scripts/comment_fixture_browser_e2e.mjs",
   "scripts/comment_adapter_fixtures/fixture-runtime.js",
@@ -30,6 +31,9 @@ export const EXPECTED_MODULE_ROLES = Object.freeze({
   "scripts/comment_chrome_fixture_receipt_testonly.mjs": "fixture-testonly",
   "scripts/comment_chrome_host_authority_test.mjs": "test",
   "scripts/comment_chrome_host_authority.mjs": "production",
+  "scripts/comment_chrome_live_bridge_test.mjs": "test",
+  "scripts/comment_chrome_live_surface_test.mjs": "test",
+  "scripts/comment_chrome_live_surface.mjs": "production",
   "scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs": "fixture-testonly",
   "scripts/comment_chrome_node_frame_lifecycle_test.mjs": "test",
   "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs": "fixture-testonly",
@@ -52,6 +56,7 @@ export const EXPECTED_MODULE_ROLES = Object.freeze({
   "scripts/comment_js_architecture_loaders.mjs": "tools",
   "scripts/comment_js_architecture_receipt.mjs": "tools",
   "scripts/comment_js_architecture_selftest.mjs": "tools",
+  "scripts/comment_meta_snapshot_parser.mjs": "production",
 });
 
 export const EXPECTED_INVENTORY = Object.freeze(
@@ -72,6 +77,13 @@ export const REQUIRED_EDGES = Object.freeze([
   ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_scan.mjs"],
   ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_send.mjs"],
+  ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_send_support.mjs"],
+  ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_runtime_authority.mjs"],
+  ["scripts/comment_chrome_claim_bridge.mjs", "scripts/comment_chrome_live_surface.mjs"],
+  ["scripts/comment_chrome_live_bridge_test.mjs", "scripts/comment_chrome_actuator.mjs"],
+  ["scripts/comment_chrome_live_surface_test.mjs", "scripts/comment_chrome_live_surface.mjs"],
+  ["scripts/comment_chrome_live_surface.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_live_surface.mjs", "scripts/comment_chrome_send_support.mjs"],
   ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_reply_exhaustion.mjs"],
   ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_send_support.mjs"],
@@ -102,6 +114,8 @@ export const REQUIRED_EDGES = Object.freeze([
   ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_host_authority.mjs"],
   ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_node_frame_mapping.mjs"],
+  ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_meta_snapshot_parser.mjs"],
+  ["scripts/comment_meta_snapshot_parser.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_node_frame_lifecycle_testonly.mjs"],
   ["scripts/comment_chrome_scan_fixture_testonly.mjs", "scripts/comment_chrome_node_frame_mapping_testonly.mjs"],
@@ -159,6 +173,7 @@ export const FIXTURE_EVIDENCE_MODULE_CLOSURE = Object.freeze([
   "scripts/comment_chrome_runtime_authority.mjs",
   "scripts/comment_chrome_scan.mjs",
   "scripts/comment_chrome_scan_adapters.mjs",
+  "scripts/comment_meta_snapshot_parser.mjs",
   "scripts/comment_chrome_scan_fixture_testonly.mjs",
   "scripts/comment_chrome_send.mjs",
   "scripts/comment_chrome_send_support.mjs",
@@ -193,6 +208,7 @@ export const FIXTURE_ALLOWED_NODE_IMPORTS = Object.freeze({
   ]),
   "scripts/comment_chrome_scan.mjs": Object.freeze([]),
   "scripts/comment_chrome_scan_adapters.mjs": Object.freeze([]),
+  "scripts/comment_meta_snapshot_parser.mjs": Object.freeze([]),
   "scripts/comment_chrome_scan_fixture_testonly.mjs": Object.freeze([]),
   "scripts/comment_chrome_send.mjs": Object.freeze([]),
   "scripts/comment_chrome_send_support.mjs": Object.freeze([]),
@@ -208,7 +224,7 @@ export const FIXTURE_ALLOWED_PROCESS_MEMBERS = Object.freeze({
 export const REVIEWED_EXTERNAL_IMPORTS = Object.freeze([
   Object.freeze({
     source: "scripts/comment_chrome_runtime_authority.mjs",
-    specifier: "../../../plugins/cache/openai-bundled/chrome/26.818.41509/scripts/browser-client.mjs",
+    specifier: "../../../plugins/cache/openai-bundled/chrome/26.825.51511/scripts/browser-client.mjs",
     kind: "dynamic",
     count: 1,
   }),

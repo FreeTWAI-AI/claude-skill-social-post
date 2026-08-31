@@ -39,10 +39,10 @@ from comment_capability_promotion_fixtures import (
 EXPECTED_PROMOTION_DEPENDENCIES = {
     "TRUSTED_CHROME_HOST_RESOLVER": [],
     "STABLE_NODE_FRAME_MAPPING": ["TRUSTED_CHROME_HOST_RESOLVER"],
-    "THREE_PLATFORM_BROWSER_FIXTURE": [
+    "THREE_PLATFORM_BROWSER_FIXTURE": [],
+    "THREE_PLATFORM_LIVE_DRAFT": [
         "TRUSTED_CHROME_HOST_RESOLVER", "STABLE_NODE_FRAME_MAPPING",
     ],
-    "THREE_PLATFORM_LIVE_DRAFT": ["THREE_PLATFORM_BROWSER_FIXTURE"],
     "LIVE_BATCH_CONFIRM": ["THREE_PLATFORM_LIVE_DRAFT"],
     "LIVE_BOUNDED_AUTO": ["LIVE_BATCH_CONFIRM"],
 }
@@ -93,6 +93,14 @@ def _dependency_graph_negatives() -> None:
     cycle = copy.deepcopy(PROMOTION_DEPENDENCIES)
     cycle["TRUSTED_CHROME_HOST_RESOLVER"] = ["LIVE_BOUNDED_AUTO"]
     candidates.append(("dependency graph cycle", cycle))
+    test_only_predecessor = copy.deepcopy(PROMOTION_DEPENDENCIES)
+    test_only_predecessor["THREE_PLATFORM_LIVE_DRAFT"] = [
+        "THREE_PLATFORM_BROWSER_FIXTURE"
+    ]
+    candidates.append((
+        "non-promotable fixture used as live predecessor",
+        test_only_predecessor,
+    ))
     for label, candidate in candidates:
         _expect_rejected(
             lambda item=candidate: validate_promotion_dependency_graph(item), label
@@ -104,11 +112,6 @@ def _positive_and_production_closed(
 ) -> None:
     for obligation_id, receipt in positives.items():
         _validate_calibration(obligation_id, receipt, version, revision, root)
-        if obligation_id == "THREE_PLATFORM_BROWSER_FIXTURE":
-            # Its production=false verifier is covered by the raw/envelope
-            # binding suite; this synthetic receipt intentionally has no raw
-            # Browser artifact to authenticate.
-            continue
         _expect_rejected(
             lambda oid=obligation_id, item=receipt: validate_promotion_receipt(
                 oid, item, version, revision, root, now=FIXED_NOW

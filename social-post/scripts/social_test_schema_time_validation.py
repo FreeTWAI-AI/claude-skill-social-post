@@ -325,6 +325,100 @@ def check_snapshot_evidence_manifest() -> None:
     if not any("must be unique" in error for error in snapshot_errors(duplicate_path)):
         raise AssertionError("duplicate evidence path passed")
 
+    account = {
+        "schema_version": "1.0",
+        "account_snapshot_id": "account-evidence-manifest",
+        "platform": "instagram",
+        "captured_at": "2026-08-30T11:00:00+08:00",
+        "window_days": 30,
+        "measurement_surface": "account_overview",
+        "metrics": {"views": 1},
+        "evidence": ["private-account-attachment.jpg"],
+        "evidence_sha256": {
+            "private-account-attachment.jpg": hashlib.sha256(
+                b"private-account-attachment"
+            ).hexdigest(),
+        },
+    }
+
+    def account_errors(candidate: dict) -> list[str]:
+        errors: list[str] = []
+        validate_account_snapshots([candidate], errors, [])
+        return errors
+
+    if errors := account_errors(account):
+        raise AssertionError(f"valid account evidence manifest failed: {errors}")
+    missing_account_digest = copy.deepcopy(account)
+    missing_account_digest["evidence_sha256"] = {}
+    if not any(
+        "exactly match" in error for error in account_errors(missing_account_digest)
+    ):
+        raise AssertionError("account snapshot missing evidence digest passed")
+    invalid_account_digest = copy.deepcopy(account)
+    invalid_account_digest["evidence_sha256"]["private-account-attachment.jpg"] = "bad"
+    if not any(
+        "map evidence paths" in error for error in account_errors(invalid_account_digest)
+    ):
+        raise AssertionError("account snapshot invalid evidence digest passed")
+
+    legacy_account = copy.deepcopy(account)
+    legacy_account["evidence"] = ["C:/private/account.jpg"]
+    legacy_account["evidence_sha256"] = {"account.jpg": "a" * 64}
+    correction_errors: list[str] = []
+    _posts, _snapshots, corrected_accounts = materialize_corrections(
+        [],
+        [],
+        [legacy_account],
+        [{
+            "schema_version": "1.0",
+            "correction_id": "normalize-account-evidence-map",
+            "recorded_at": "2026-08-30T12:00:00+08:00",
+            "target_type": "account_snapshot",
+            "target_id": legacy_account["account_snapshot_id"],
+            "changes": {
+                "evidence_sha256": {"C:/private/account.jpg": "b" * 64},
+            },
+        }],
+        correction_errors,
+    )
+    if correction_errors:
+        raise AssertionError(f"account evidence correction failed: {correction_errors}")
+    if corrected_accounts[0]["evidence_sha256"] != {
+        "C:/private/account.jpg": "b" * 64,
+    }:
+        raise AssertionError("evidence manifest correction merged obsolete path keys")
+
+
+def check_account_latest_surface_index() -> None:
+    def account(snapshot_id: str, surface: str, views: int) -> dict:
+        return {
+            "schema_version": "1.0",
+            "account_snapshot_id": snapshot_id,
+            "platform": "instagram",
+            "captured_at": "2026-08-30T11:00:00+08:00",
+            "window_days": 30,
+            "measurement_surface": surface,
+            "metrics": {"views": views},
+        }
+
+    errors: list[str] = []
+    latest = validate_account_snapshots([
+        account("account-overview", "account_overview", 1),
+        account("account-ranking-a", "reel_rankings", 2),
+        account("account-ranking-z", "reel_rankings", 3),
+    ], errors, [])
+    if errors:
+        raise AssertionError(f"account latest surface fixture failed: {errors}")
+    if set(latest) != {
+        ("instagram", 30, "account_overview"),
+        ("instagram", 30, "reel_rankings"),
+    }:
+        raise AssertionError(f"account measurement surfaces were collapsed: {latest}")
+    if latest[("instagram", 30, "reel_rankings")]["account_snapshot_id"] != (
+        "account-ranking-z"
+    ):
+        raise AssertionError("equal-time account snapshots lack a deterministic ID tie-break")
+
 
 def main() -> int:
     check_post_schema_and_timezone()
@@ -332,6 +426,7 @@ def main() -> int:
     check_validated_experiment_gate()
     check_every_ledger_has_a_schema_gate()
     check_snapshot_evidence_manifest()
+    check_account_latest_surface_index()
     print("PASS social schema/time validation")
     return 0
 

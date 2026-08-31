@@ -14,7 +14,7 @@ const ARCHITECTURE_RECEIPT_PATH = ".rd/receipts/js-architecture-gate.json";
 const ARCHITECTURE_SIDECAR_PATH = `${ARCHITECTURE_RECEIPT_PATH}.sha256`;
 const REVIEWED_BROWSER_CLIENT_DEPENDENCY = Object.freeze({
   source: "scripts/comment_chrome_runtime_authority.mjs",
-  specifier: "../../../plugins/cache/openai-bundled/chrome/26.818.41509/scripts/browser-client.mjs",
+  specifier: "../../../plugins/cache/openai-bundled/chrome/26.825.51511/scripts/browser-client.mjs",
   kind: "dynamic",
   count: 1,
 });
@@ -152,6 +152,7 @@ async function snapshotCurrentArchitectureInventory() {
     throw new Error("fixture architecture inventory contains a non-regular module entry");
   }
   const paths = selected.map((entry) => `scripts/${entry.name}`);
+  paths.push("scripts/comment_meta_snapshot_parser.mjs");
   paths.push("scripts/comment_fixture_browser_e2e.mjs");
   paths.push("scripts/comment_adapter_fixtures/fixture-runtime.js");
   const exact = [...new Set(paths)].sort((left, right) => left.localeCompare(right));

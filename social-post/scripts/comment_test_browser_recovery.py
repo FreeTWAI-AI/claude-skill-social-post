@@ -12,6 +12,7 @@ from comment_test_browser_contract_support import (
     preflight_for, reinspection_for, result_for, write_json,
 )
 from comment_test_cli import run_cli
+from comment_test_browser_recovery_action import run_browser_recovery_action_tests
 
 
 LEDGERS = (
@@ -388,6 +389,7 @@ def check_recovery_respects_live_kill_switch() -> None:
 
 
 def run_browser_recovery_tests() -> None:
+    run_browser_recovery_action_tests()
     check_isolated_fused_recovery_harness()
     check_restart_recovery_is_reconcile_only()
     check_expired_capability_recovers_and_can_remain_unknown()

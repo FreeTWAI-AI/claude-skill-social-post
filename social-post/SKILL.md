@@ -7,6 +7,8 @@ description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語
 
 把內容生成、實際發布與成效學習分開。依意圖只讀必要資料，不把整個案例庫一次塞進 context。
 
+P5 執行前先核對 `references/chrome-comment-adapter.md` 的當前狀態：來源綁定掃描已接線，候選單次送出／唯讀恢復已實作，但三平台真實送出 canary 未完成，送出開關仍關閉。FB／IG 不可用的部分必須明示，不得以 fixture 或只讀編輯器檢查宣稱完整自動回覆已完成。
+
 ## Session 啟動
 
 P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要求深度仿寫，或 quick card 無法裁決時，才完整讀 `style_profile.md` 或使用者明確指定的 voice Skill。安全與使用者明示 > voice quick／明確指定的 voice Skill > 公式。

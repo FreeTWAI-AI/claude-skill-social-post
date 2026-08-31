@@ -1,6 +1,6 @@
 # Chrome Comment Adapter Protocol
 
-> last_verified: 2026-08-28
+> last_verified: 2026-08-31
 > scope: Codex 透過已登入的 Google Chrome，將可見 FB／IG／Threads 留言與本地 comment ledger 接起來。
 
 這份文件只在 P5 實際掃描或回覆時讀。Chrome 是 UI actuator；`comment_assistant.py` 是 scope、授權與稽核的 source of truth。`scripts/comment_chrome_actuator.mjs` 是薄 facade，scan、versioned platform adapter、read-only host/document contract、send 與 durable claim bridge 分別在 `comment_chrome_scan.mjs`、`comment_chrome_scan_adapters.mjs`、`comment_chrome_host_authority.mjs`、`comment_chrome_send.mjs`、`comment_chrome_claim_bridge.mjs`。兩邊只交換版本化 JSON action／receipt，不讓瀏覽器自己決定回覆內容、授權或重試。
@@ -33,7 +33,18 @@ live Chrome read
 
 Python 不能直接 import Codex 的 Chrome 工具，因此 bridge 不是背景 daemon。使用者啟動 P5 後，由當前 Codex Node session 持有 Chrome tab 與 actuator，逐步交換 JSON。`comment_chrome_claim_bridge.mjs` 以 `spawn` 參數陣列和 stdin 呼叫本機 ledger CLI，`shell:false`，不碰 Cookie、profile 或 Meta API。
 
-正式 policy 另有 `live_browser_actuation_enabled=false` 的 default-deny gate。它不阻擋 read-only preparation、safe preview 或 action envelope，但會在任何 canonical ledger mutation 前拒絕 live `browser-scan／begin／finish／reconcile --write`。因此正式 Python claim 失敗時 actuator 必須在 click 前停止；contract fixture 只能在自己的 temp policy 顯式 opt-in，不能把這項測試證據冒充登入 Meta 的 live canary。
+掃描與送出有獨立開關：`live_browser_scan_enabled=true` 允許已核准 scope 的來源綁定掃描回填；`live_browser_actuation_enabled=false` 仍拒絕 live begin／finish／reconcile。正式 claim 失敗時 actuator 必須在 click 前停止。測試通過不等於三平台 live canary 通過，也不能因使用者核准某則回覆就跳過維護者開關。
+
+## 當前實作狀態（不是完成宣告）
+
+- `scanAndCommit(tab, target, locatorPlan, options)`：來源綁定的 Chrome 掃描與私有帳本回填；正式模式由受信任 host 取得證據，不接受 caller 自行捏造的 receipt。參數型態以 bridge 實作為準。
+- `executeApprovedReply({ intentId, sessionId })`：新增候選 fused 路徑。只讀取本機已核准 action，私有 tab 驗證原留言、編輯器、完整本文與穩定節點，durable claim 後最多點擊一次，再由私有 bridge 提交結果。預設開關仍關閉。
+- `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 claim、不 submit。新的唯讀 `browser-recovery-action` 會核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。
+- Threads 已完成指定樣本的帳號、原貼文、原留言、零回覆狀態與編輯器只讀驗證；尚無本版真實送出／結果回讀 canary。不得宣稱 sent 或完整自動回覆已驗證。
+- FB 已辨識指定樣本的既有自己回覆及其 form；完整展開與 composer actor 尚未驗證，因此 `complete=false`，不允許送出或推導不存在。IG 沒有獲准且可驗證的非零留言樣本，live reply surface 仍不可用。
+- 不用未指定貼文、動態牆、私訊或整頁私人截圖補齊缺證據。缺少指定樣本或公開測試授權時停止 live 驗證，報告具體缺口；不要重跑同一批 tests 當成進度。
+
+以下分離式 `prepareReply`／`submitOnce` 舊介面仍是 fixture／未來契約；不得把它與上方候選 fused 入口混為一談。候選入口必須經授權 canary 與完整回覆展開驗證才能升級公開 capability projection。
 
 ## 可執行 actuator
 

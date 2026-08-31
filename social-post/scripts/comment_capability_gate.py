@@ -147,7 +147,13 @@ def validate_verified(
     evidence = row.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         raise ValueError(f"{label} requires replayable evidence")
-    guarded = row.get("id") in PROMOTION_REQUIREMENTS
+    requirement = PROMOTION_REQUIREMENTS.get(row.get("id"))
+    guarded = requirement is not None
+    if guarded and requirement.get("promotion") is not True:
+        raise ValueError(
+            f"{label} is test-only quality evidence with promotion=false and "
+            "cannot have status=verified"
+        )
     for entry in evidence:
         if not isinstance(entry, dict) or entry.get("kind") not in {"file", "promotion_receipt"}:
             raise ValueError(f"{label} evidence must use file or promotion_receipt inputs")
@@ -172,6 +178,17 @@ def validate_promotion_dependencies(rows: list[dict[str, Any]]) -> None:
     }
     if any(obligation_id not in by_id for obligation_id in PROMOTION_DEPENDENCIES):
         raise ValueError("promotion dependency graph is missing a guarded obligation")
+    forbidden_verified = [
+        obligation_id
+        for obligation_id, requirement in PROMOTION_REQUIREMENTS.items()
+        if requirement.get("promotion") is not True
+        and by_id[obligation_id].get("status") == "verified"
+    ]
+    if forbidden_verified:
+        raise ValueError(
+            f"obligation {forbidden_verified[0]} has promotion=false and cannot "
+            "have status=verified"
+        )
     for obligation_id, prerequisites in PROMOTION_DEPENDENCIES.items():
         if by_id[obligation_id].get("status") != "verified":
             continue

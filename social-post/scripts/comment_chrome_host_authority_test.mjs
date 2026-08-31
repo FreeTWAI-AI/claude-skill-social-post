@@ -14,8 +14,10 @@ import {
   CHROME_BROWSER_CLIENT_REVISION,
   CHROME_BROWSER_CLIENT_SHA256,
   CHROME_RUNTIME_AUTHORITY_VERSION,
+  captureChromeAccessibleSnapshotPair,
   chromeRuntimeAuthorityDescriptor,
   isExistingChromeReadSession,
+  loadSetupBrowserRuntime,
   openExistingChromeReadSession,
   verifyPinnedBrowserClientBytes,
 } from "./comment_chrome_runtime_authority.mjs";
@@ -37,13 +39,13 @@ const TARGETS = {
 
 assert.equal(TRUSTED_CHROME_HOST_SCHEMA_VERSION, 2);
 assert.equal(TRUSTED_CHROME_HOST_RESOLVER_VERSION, "2026-08-30.1");
-assert.equal(CHROME_RUNTIME_AUTHORITY_VERSION, "2026-08-30.2");
-assert.equal(CHROME_BROWSER_CLIENT_REVISION, "openai-bundled/chrome/26.818.41509");
+assert.equal(CHROME_RUNTIME_AUTHORITY_VERSION, "2026-08-31.1");
+assert.equal(CHROME_BROWSER_CLIENT_REVISION, "openai-bundled/chrome/26.825.51511");
 assert.equal(
   CHROME_BROWSER_CLIENT_SHA256,
-  "53484b46feddd277e436a0c3f38820eca8aab4e32c01bb44e1b5766eb369b5e6",
+  "c52ba09202f0e82caa6f6d2a6463a8635c1b1316567975d9b91c1a05fb5af501",
 );
-assert.equal(CHROME_BROWSER_CLIENT_BYTES, 148173);
+assert.equal(CHROME_BROWSER_CLIENT_BYTES, 149210);
 assert.throws(
   () => verifyPinnedBrowserClientBytes(null),
   /pinned browser-client bytes are unavailable/u,
@@ -54,12 +56,21 @@ assert.throws(
 );
 
 const runtimeDescriptor = chromeRuntimeAuthorityDescriptor();
+assert.equal(
+  runtimeDescriptor.status,
+  "source_wired_authenticated_chrome_exact_url_bounded_tab",
+);
 assert.equal(runtimeDescriptor.existing_session_only, true);
-assert.equal(runtimeDescriptor.exact_fresh_open_tabs_object_required, true);
+assert.equal(runtimeDescriptor.exact_fresh_open_tabs_object_required, false);
+assert.equal(runtimeDescriptor.bounded_process_owned_tab, true);
 assert.equal(runtimeDescriptor.trusted_node_repl_required, true);
 assert.equal(runtimeDescriptor.raw_tab_exposed, false);
 assert.equal(runtimeDescriptor.can_launch_browser, false);
-assert.equal(runtimeDescriptor.can_navigate, false);
+assert.equal(runtimeDescriptor.can_navigate, true);
+assert.equal(
+  runtimeDescriptor.navigation_scope,
+  "one exact trusted post permalink per read operation",
+);
 assert.equal(runtimeDescriptor.can_mutate_page, false);
 assert.equal(runtimeDescriptor.can_read_browser_storage, false);
 assert.equal(runtimeDescriptor.browser_client_sha256, CHROME_BROWSER_CLIENT_SHA256);
@@ -87,6 +98,9 @@ assert.equal(Object.isFrozen(descriptor), true);
 assert.equal(resolveTrustedChromeHost.length, 1);
 assert.equal(verifyTrustedChromeHostStillCurrent.length, 2);
 assert.equal(openExistingChromeReadSession.length, 1);
+assert.equal(captureChromeAccessibleSnapshotPair.length, 1);
+assert.equal(typeof loadSetupBrowserRuntime, "function");
+assert.equal(loadSetupBrowserRuntime.length, 0);
 assert.equal(isTrustedChromeHostAttestation({}), false);
 assert.equal(isExistingChromeReadSession({}), false);
 
@@ -108,6 +122,18 @@ for (const [label, target, pattern] of [
   ],
 ]) {
   await assert.rejects(() => resolveTrustedChromeHost(target), pattern, label);
+  await assert.rejects(
+    () => captureChromeAccessibleSnapshotPair(target, { settleMs: 0 }),
+    /not a trusted post permalink/u,
+    `bounded snapshot rejects ${label}`,
+  );
+}
+
+for (const settleMs of [-1, 10001, 0.5, "0", null]) {
+  await assert.rejects(
+    () => captureChromeAccessibleSnapshotPair(TARGETS.facebook, { settleMs }),
+    /settleMs must be an integer from 0 to 10000/u,
+  );
 }
 
 await assert.rejects(
@@ -128,6 +154,10 @@ await assert.rejects(
   () => resolveTrustedChromeHost(TARGETS.instagram),
   /pinned browser-client bytes are unavailable|trusted Node REPL browser service/u,
 );
+await assert.rejects(
+  () => captureChromeAccessibleSnapshotPair(TARGETS.threads, { settleMs: 0 }),
+  /pinned browser-client bytes are unavailable|trusted Node REPL browser service/u,
+);
 
 const runtimeSource = await readFile(
   new URL("./comment_chrome_runtime_authority.mjs", import.meta.url), "utf8",
@@ -138,7 +168,7 @@ const hostSource = await readFile(
 
 const browserClientSpecifier = [
   "..", "..", "..", "plugins", "cache", "openai-bundled", "chrome",
-  "26.818.41509", "scripts", "browser-client.mjs",
+  "26.825.51511", "scripts", "browser-client.mjs",
 ].join("/");
 assert.equal(
   runtimeSource.includes(`"${browserClientSpecifier}"`),
@@ -157,10 +187,37 @@ assert.match(
   /verifyTrustedChromeHostStillCurrent\(attestation, rawTarget\)/u,
 );
 
+// Navigation is allowed only in the source-wired bounded capture operation.
+// Keep the claimed-tab host resolver read-only and reject any added navigation
+// call, even if the descriptor still claims a single exact target.
+const captureStart = runtimeSource.indexOf(
+  "export async function captureChromeAccessibleSnapshotPair(rawTarget, options = {}) {",
+);
+const captureEnd = runtimeSource.indexOf("\nfunction requireBrowserSurface(agent) {", captureStart);
+assert.ok(captureStart >= 0 && captureEnd > captureStart);
+const captureSource = runtimeSource.slice(captureStart, captureEnd);
+const otherRuntimeSource = runtimeSource.slice(0, captureStart) + runtimeSource.slice(captureEnd);
+assert.match(captureSource, /const expectedUrl = approvedPermalink\(rawTarget\);/u);
+assert.match(captureSource, /const browser = await agent\.browsers\.get\("chrome"\);/u);
+assert.match(captureSource, /const tab = await browser\.tabs\.new\(\);\s*try\s*\{\s*await tab\.goto\(expectedUrl\);/u);
+assert.deepEqual(
+  runtimeSource.match(/\.(?:goto|reload|back|forward)\s*\([^)]*\)/gu),
+  [".goto(expectedUrl)"],
+);
+assert.deepEqual(runtimeSource.match(/\.tabs\.new\s*\([^)]*\)/gu), [".tabs.new()"]);
+assert.match(captureSource, /if \(!sameUrl\(beforeUrl, expectedUrl\)\)/u);
+assert.match(captureSource, /if \(!sameUrl\(afterUrl, expectedUrl\) \|\| !sameUrl\(afterUrl, beforeUrl\)\)/u);
+assert.match(captureSource, /exact_navigation_count: 1/u);
+assert.match(captureSource, /page_mutation_count: 0/u);
+assert.match(captureSource, /tab_cleanup_required: true/u);
+assert.match(captureSource, /finally\s*\{[\s\S]*tab\.close\(\)/u);
+for (const source of [otherRuntimeSource, hostSource]) {
+  assert.doesNotMatch(source, /\.(?:goto|reload|back|forward)\s*\(/u);
+  assert.doesNotMatch(source, /\.tabs\.new\s*\(/u);
+}
+
 for (const [label, pattern] of [
   ["DOM property installation", /Object\.definePropert(?:y|ies)\s*\(/u],
-  ["navigation", /\.(?:goto|reload|back|forward)\s*\(/u],
-  ["new tab", /\.tabs\.new\s*\(/u],
   ["page click", /\.click\s*\(/u],
   ["page fill", /\.fill\s*\(/u],
   ["page key press", /\.press\s*\(/u],

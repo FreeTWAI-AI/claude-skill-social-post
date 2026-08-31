@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from comment_test_browser_adapter import LocalFixtureCommentAdapter
+from comment_test_browser_send_urls import run_browser_send_url_tests
 from comment_test_cli import draft_cli_fixture, prepare_cli_fixture, run_cli
 from comment_test_support import ROOT
 from comment_test_browser_contract_support import (
@@ -456,6 +457,7 @@ def check_live_legacy_bridge_gate() -> None:
 
 
 def run_browser_send_contract_tests() -> None:
+    run_browser_send_url_tests()
     for platform in ("facebook", "instagram", "threads"):
         run_contract_lifecycle(platform, verified=True)
     run_contract_lifecycle("threads", verified=False)

@@ -32,16 +32,19 @@ CANONICAL_HASH_GOLDEN_SHA256 = (
 )
 
 
-# Direct prerequisites are closed-world. Transitive closure is enforced by
-# comment_capability_gate.py before any guarded row may become verified.
+# Direct production-promotion prerequisites are closed-world.  Contract rows
+# with promotion=false remain in the graph as test-only quality-evidence roots,
+# but they may never become verified or appear as a predecessor of a live row.
+# Transitive closure is enforced by comment_capability_gate.py before any
+# promotable guarded row may become verified.
 PROMOTION_DEPENDENCIES: dict[str, list[str]] = {
     "TRUSTED_CHROME_HOST_RESOLVER": [],
     "STABLE_NODE_FRAME_MAPPING": ["TRUSTED_CHROME_HOST_RESOLVER"],
-    "THREE_PLATFORM_BROWSER_FIXTURE": [
+    "THREE_PLATFORM_BROWSER_FIXTURE": [],
+    "THREE_PLATFORM_LIVE_DRAFT": [
         "TRUSTED_CHROME_HOST_RESOLVER",
         "STABLE_NODE_FRAME_MAPPING",
     ],
-    "THREE_PLATFORM_LIVE_DRAFT": ["THREE_PLATFORM_BROWSER_FIXTURE"],
     "LIVE_BATCH_CONFIRM": ["THREE_PLATFORM_LIVE_DRAFT"],
     "LIVE_BOUNDED_AUTO": ["LIVE_BATCH_CONFIRM"],
 }
@@ -354,6 +357,18 @@ def validate_promotion_dependency_graph(graph: Any) -> None:
             or node in predecessors
         ):
             raise ValueError(f"promotion dependency graph has invalid predecessors for {node}")
+    non_promotable = {
+        obligation_id
+        for obligation_id, requirement in REQUIREMENTS.items()
+        if requirement.get("promotion") is not True
+    }
+    for node, predecessors in graph.items():
+        forbidden = [item for item in predecessors if item in non_promotable]
+        if forbidden:
+            raise ValueError(
+                f"promotion dependency graph cannot use non-promotable predecessor "
+                f"{forbidden[0]} for {node}"
+            )
     visiting: set[str] = set()
     visited: set[str] = set()
 

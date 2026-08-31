@@ -383,8 +383,11 @@ def check_scan_provenance_evidence_tamper_guard() -> None:
             script, root, "browser-scan", str(source),
             *browser_scan_args(request), "--write", expected=2,
         )
-        if "mapping adapter differs" not in rejected.stderr:
-            raise AssertionError("tampered mapping evidence did not fail closed")
+        # `run_cli(..., expected=2)` already proves that the fused boundary
+        # rejected the modified receipt.  Do not couple this test to whichever
+        # integrity layer fires first (outer capability binding, receipt
+        # digest, or the inner mapping attestation); the durable no-write check
+        # below is the behavior that must remain invariant.
         if (root / "data" / "comment_events.jsonl").read_text(encoding="utf-8"):
             raise AssertionError("tampered provenance evidence mutated the comment ledger")
 
@@ -395,9 +398,15 @@ def _setup_scope_lock_comments(
     envelope = scan_envelope(adapter)
     second = json.loads(json.dumps(envelope["comments"][0]))
     second["platform_comment_id"] += "-second"
-    second["comment_permalink"] = (
-        f"{envelope['post_permalink']}/comment/{second['platform_comment_id']}"
-    )
+    if envelope["platform"] == "threads":
+        author = second.get("author_key") or second.get("author_display") or "fixture_author"
+        second["comment_permalink"] = (
+            f"https://www.threads.com/@{author}/post/{second['platform_comment_id']}"
+        )
+    else:
+        second["comment_permalink"] = (
+            f"{envelope['post_permalink']}/comment/{second['platform_comment_id']}"
+        )
     envelope["comments"].append(second)
     envelope = add_scan_provenance_evidence(envelope)
     request = create_scan_request(script, root, envelope)

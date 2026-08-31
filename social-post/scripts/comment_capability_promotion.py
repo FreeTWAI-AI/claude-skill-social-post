@@ -105,6 +105,12 @@ def validate_promotion_receipt(
     requirement = REQUIREMENTS.get(obligation_id)
     if requirement is None:
         return
+    if not calibration_only and requirement.get("promotion") is not True:
+        fail(
+            obligation_id,
+            "cannot promote: contract fixes promotion=false; test-only quality "
+            "evidence cannot become a verified capability",
+        )
     require_exact_keys(
         receipt,
         COMMON_KEYS | OBLIGATION_KEYS[obligation_id],
@@ -131,6 +137,13 @@ def validate_promotion_receipt(
 def validate_promotion_evidence(
     row: dict[str, Any], version: str, revision: str, root: Path,
 ) -> None:
+    requirement = REQUIREMENTS.get(row.get("id"))
+    if requirement is not None and requirement.get("promotion") is not True:
+        fail(
+            row["id"],
+            "cannot promote: contract fixes promotion=false; test-only quality "
+            "evidence cannot satisfy a verified ledger row",
+        )
     relative = required_promotion_receipt(row)
     if relative is None:
         return

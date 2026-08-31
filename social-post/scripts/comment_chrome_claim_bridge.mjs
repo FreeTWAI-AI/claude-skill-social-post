@@ -1,11 +1,22 @@
 /** Durable, shell-free bridge from the Chrome actuator to the Python comment ledger. */
 
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { digestObject, fail, requiredString } from "./comment_chrome_common.mjs";
+import {
+  assertSingleLine, digestObject, fail, immutableJsonSnapshot, nowIso,
+  requiredString, unique,
+} from "./comment_chrome_common.mjs";
 import { createScanPost } from "./comment_chrome_scan.mjs";
 import { createSendOperations } from "./comment_chrome_send.mjs";
+import {
+  actionDigest, assertAction, claimRequest, preparationCore, validateWriteDecision,
+} from "./comment_chrome_send_support.mjs";
+import { loadSetupBrowserRuntime } from "./comment_chrome_runtime_authority.mjs";
+import {
+  bindLiveReplyBrowser, bindLiveSubmitNode, inspectLiveReplySurface, liveReplyUrl,
+} from "./comment_chrome_live_surface.mjs";
 
 
 const DEFAULT_SCRIPT = fileURLToPath(new URL("./comment_assistant.py", import.meta.url));
@@ -15,6 +26,457 @@ const pythonLedgerReceiptCommitters = new WeakMap();
 const pythonLedgerRecoveryStarters = new WeakMap();
 const RECEIPT_OPERATIONS = new Set(["browser-finish", "browser-reconcile"]);
 const SCAN_OPERATION = "browser-scan";
+const liveReplyExecutionReservations = new Set();
+const liveReplyRecoveryContexts = new Map();
+const liveReplyRecoveryInFlight = new Set();
+
+async function requireLiveReplyPolicy() {
+  const policy = JSON.parse(await readFile(
+    new URL("../references/comment-policy.json", import.meta.url), "utf8",
+  ));
+  if (policy.live_browser_actuation_enabled !== true) {
+    fail("live reply execution is disabled by policy");
+  }
+}
+
+async function readApprovedReplyAction(intentId, sessionId) {
+  const child = spawn("python", [
+    DEFAULT_SCRIPT, "browser-action", "--intent-id", intentId,
+    "--session-id", sessionId,
+  ], { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const stdoutPromise = collect(child.stdout, child, "action bridge stdout");
+  const stderrPromise = collect(child.stderr, child, "action bridge stderr");
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("approved action read timed out after 15000 ms"));
+    }, 15000);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+  if (code !== 0) {
+    fail(`approved action read failed: ${stderr.trim().slice(0, 1000) || `exit code ${code}`}`);
+  }
+  let raw;
+  try {
+    raw = JSON.parse(stdout);
+  } catch {
+    fail("approved action read returned malformed JSON");
+  }
+  const action = assertAction(immutableJsonSnapshot(raw, "approved live action"));
+  if (action.intent_id !== intentId || action.session_id !== sessionId) {
+    fail("approved live action differs from the requested intent/session");
+  }
+  if (assertSingleLine(action.reply_text, "approved reply text") !== action.reply_text) {
+    fail("approved live reply text must already be normalized and single-line");
+  }
+  requireCurrentReplyPermit(action);
+  return action;
+}
+
+function requireCurrentReplyPermit(action) {
+  const expiresAt = Date.parse(requiredString(action.expires_at, "approved action.expires_at"));
+  if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
+    fail("approved live reply permit is expired or invalid");
+  }
+}
+
+function requireCompleteLiveSurface(surface, { requireNoOwnReply = false } = {}) {
+  if (!surface || surface.complete !== true) {
+    fail("live reply surface has no complete target-scoped reply evidence");
+  }
+  requiredString(surface.observedUrl, "live reply surface.observedUrl");
+  for (const key of ["totalReplies", "exactOwnCount", "ownReplyCount"]) {
+    if (!Number.isSafeInteger(surface[key]) || surface[key] < 0) {
+      fail(`live reply surface.${key} must be a non-negative integer`);
+    }
+  }
+  if (surface.exactOwnCount > surface.ownReplyCount
+      || surface.ownReplyCount > surface.totalReplies) {
+    fail("live reply surface counts are inconsistent");
+  }
+  if (requireNoOwnReply && surface.ownReplyCount !== 0) {
+    fail("an own-account reply already exists under the approved parent");
+  }
+  return surface;
+}
+
+async function readExactLiveComposer(composer) {
+  const value = await composer.evaluate((element) => {
+    const editable = element.isContentEditable === true
+      || (element.hasAttribute("contenteditable")
+        && element.getAttribute("contenteditable").toLowerCase() !== "false");
+    if (editable) return element.innerText ?? element.textContent;
+    if ("value" in element) return element.value;
+    return element.textContent;
+  });
+  if (typeof value !== "string") fail("live reply composer text is unavailable");
+  return value.normalize("NFC");
+}
+
+async function inspectReadyLiveComposer(tab, action) {
+  const surface = requireCompleteLiveSurface(
+    await inspectLiveReplySurface(tab, action, "before"), { requireNoOwnReply: true },
+  );
+  if (!surface.composer) fail("approved parent has no verified reply composer");
+  const composer = await unique(surface.composer, "live reply composer", { enabled: true });
+  if ((await readExactLiveComposer(composer)) !== action.reply_text) {
+    fail("live reply composer differs from the immutable approved text");
+  }
+  if (!surface.submit) fail("approved parent has no verified reply submit control");
+  await unique(surface.submit, "live reply submit control", { enabled: true });
+  return surface;
+}
+
+async function prepareLiveReply(tab, action, plan) {
+  let surface = requireCompleteLiveSurface(
+    await inspectLiveReplySurface(tab, action, "before"), { requireNoOwnReply: true },
+  );
+  requireCurrentReplyPermit(action);
+  if (surface.trigger) {
+    const trigger = await unique(surface.trigger, "live reply trigger", { enabled: true });
+    await trigger.click({ timeoutMs: 5000 });
+    surface = requireCompleteLiveSurface(
+      await inspectLiveReplySurface(tab, action, "before"), { requireNoOwnReply: true },
+    );
+  }
+  if (!surface.composer) fail("approved parent has no verified reply composer");
+  const composer = await unique(surface.composer, "live reply composer", { enabled: true });
+  if ((await readExactLiveComposer(composer)) !== "") {
+    fail("live reply composer was not empty before fill");
+  }
+  requireCurrentReplyPermit(action);
+  await composer.fill(action.reply_text, { timeoutMs: 5000 });
+  const ready = await inspectReadyLiveComposer(tab, action);
+  if (ready.totalReplies < surface.totalReplies) {
+    fail("live reply coverage decreased while preparing the composer");
+  }
+  const receipt = {
+    schema_version: 1, test_only: false,
+    action_id: action.action_id, intent_id: action.intent_id,
+    session_id: action.session_id, permit_id: action.permit_id,
+    scope: action.scope, comment_fingerprint: action.comment_fingerprint,
+    reply_hash: action.reply_hash, action_digest: actionDigest(action),
+    plan_digest: digestObject(plan, "source-owned live reply plan"),
+    observed_url: ready.observedUrl, observed_at: nowIso(),
+    baseline_exact_reply_count: 0, baseline_total_reply_count: ready.totalReplies,
+    account_verified: true, post_verified: true, target_verified: true,
+    body_complete: true, composer_empty_before_fill: true,
+    composer_matches_reply: true, reply_control_verified: true,
+    evidence: "source-owned live adapter verified approved parent, complete zero-own reply baseline, and exact initially-empty composer",
+  };
+  receipt.preparation_id = digestObject(preparationCore(receipt), "live preparation receipt");
+  return immutableJsonSnapshot(receipt, "live preparation receipt");
+}
+
+async function inspectLiveFinishReceipt(tab, action, preparation, decision, attempted, dispatchError) {
+  let observed;
+  let inspectionError;
+  try {
+    observed = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
+  } catch (error) {
+    inspectionError = String(error?.message ?? error).slice(0, 500);
+  }
+  const contextVerified = Boolean(observed);
+  const exactOne = contextVerified && observed.exactOwnCount === 1
+    && observed.ownReplyCount === 1
+    && observed.totalReplies >= preparation.baseline_total_reply_count + 1;
+  const evidence = inspectionError
+    ? `fresh target inspection failed; result must not be inferred from dispatch: ${inspectionError}`
+    : exactOne
+      ? "fresh complete parent-scoped inspection found one new exact own-account reply"
+      : `fresh complete inspection found ${observed.exactOwnCount} exact own replies among ${observed.totalReplies} replies`;
+  return immutableJsonSnapshot({
+    schema_version: 1, test_only: false,
+    action_id: action.action_id, intent_id: action.intent_id, session_id: action.session_id,
+    scope: action.scope, comment_fingerprint: action.comment_fingerprint,
+    reply_hash: action.reply_hash, preparation_id: preparation.preparation_id,
+    claim_id: decision.claim_id, preflight_id: decision.preflight_id,
+    observed_url: observed?.observedUrl ?? preparation.observed_url,
+    observed_at: nowIso(), submission_attempted: attempted, submission_possible: attempted,
+    account_verified: contextVerified, post_verified: contextVerified,
+    target_verified: contextVerified, parent_verified: contextVerified,
+    exact_reply_visible: exactOne, own_author_verified: exactOne,
+    post_submit_total_reply_count: observed?.totalReplies ?? 0,
+    evidence: dispatchError ? `${evidence}; dispatch boundary error: ${dispatchError}` : evidence,
+  }, "live browser finish receipt");
+}
+
+async function submitLiveReplyAndFinish(tab, action, plan, preparation) {
+  await requireLiveReplyPolicy();
+  requireCurrentReplyPermit(action);
+  const before = await inspectReadyLiveComposer(tab, action);
+  if (before.observedUrl !== preparation.observed_url
+      || before.totalReplies < preparation.baseline_total_reply_count) {
+    fail("live reply context changed before the durable claim");
+  }
+  if (!tab.dom_cua || typeof tab.dom_cua.click !== "function") {
+    fail("live reply requires the trusted DOM-CUA submit surface");
+  }
+  const nodeId = await bindLiveSubmitNode(tab, before.submit);
+  if (liveReplyExecutionReservations.has(action.action_id)) {
+    fail("a second in-process execution of this approved live action is blocked");
+  }
+  // Reserve before the claim request. Even an unacknowledged claim may have
+  // reached the ledger; this reservation is intentionally never released.
+  liveReplyExecutionReservations.add(action.action_id);
+  const claimSubmit = createPythonLedgerClaimSubmit({ preparation });
+  if (!isPythonLedgerClaimSubmit(claimSubmit)) fail("live reply requires the default ledger bridge");
+  const request = claimRequest(action, plan, preparation);
+  const decision = validateWriteDecision(await claimSubmit(request), request);
+  let attempted = false;
+  let dispatchError;
+  try {
+    requireCurrentReplyPermit(action);
+    const afterClaim = await inspectReadyLiveComposer(tab, action);
+    if (afterClaim.observedUrl !== preparation.observed_url
+        || afterClaim.totalReplies < preparation.baseline_total_reply_count) {
+      fail("live reply context changed after the durable claim");
+    }
+    if (await bindLiveSubmitNode(tab, afterClaim.submit) !== nodeId) {
+      fail("live reply submit node changed after the durable claim");
+    }
+    if (!tab.dom_cua || typeof tab.dom_cua.click !== "function") {
+      fail("live reply requires the trusted DOM-CUA submit surface");
+    }
+    await requireLiveReplyPolicy();
+    requireCurrentReplyPermit(action);
+    attempted = true;
+    await tab.dom_cua.click({ node_id: nodeId });
+  } catch (error) {
+    dispatchError = String(error?.message ?? error).slice(0, 500);
+  }
+  const receipt = await inspectLiveFinishReceipt(
+    tab, action, preparation, decision, attempted, dispatchError,
+  );
+  const commit = await commitPythonLedgerBrowserReceipt(claimSubmit, "browser-finish", receipt);
+  return Object.freeze({ action_id: action.action_id, intent_id: action.intent_id, ...commit });
+}
+
+async function executeLiveApprovedReply(rawRequest) {
+  const request = immutableJsonSnapshot(rawRequest, "approved live reply request");
+  if (!request || typeof request !== "object" || Array.isArray(request)
+      || Object.keys(request).length !== 2
+      || !Object.hasOwn(request, "intentId") || !Object.hasOwn(request, "sessionId")) {
+    fail("executeApprovedReply accepts only intentId and sessionId");
+  }
+  const intentId = requiredString(request.intentId, "live reply intentId");
+  const sessionId = requiredString(request.sessionId, "live reply sessionId");
+  await requireLiveReplyPolicy();
+  const action = await readApprovedReplyAction(intentId, sessionId);
+  if (liveReplyExecutionReservations.has(action.action_id)) {
+    fail("a second in-process execution of this approved live action is blocked");
+  }
+  const targetUrl = liveReplyUrl(action);
+  const plan = immutableJsonSnapshot({
+    schema_version: 1, adapter_id: "source-owned-meta-live-reply",
+    adapter_version: "2026-08-31.1", platform: action.scope.platform,
+    target_url: targetUrl, comment_anchor: action.comment_anchor,
+  }, "source-owned live reply plan");
+  const setupBrowserRuntime = await loadSetupBrowserRuntime();
+  const agent = await setupBrowserRuntime();
+  const browser = await agent.browsers.get("chrome");
+  const tab = await browser.tabs.new();
+  try {
+    bindLiveReplyBrowser(tab, browser);
+    await tab.goto(targetUrl);
+    const preparation = await prepareLiveReply(tab, action, plan);
+    return await submitLiveReplyAndFinish(tab, action, plan, preparation);
+  } finally {
+    try {
+      await Promise.race([
+        tab.close(), new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    } catch {
+      // Cleanup uncertainty never causes a second claim or submission attempt.
+    }
+  }
+}
+
+async function readLiveRecoveryAction(intentId, sessionId) {
+  const child = spawn("python", [
+    DEFAULT_SCRIPT, "browser-recovery-action", "--intent-id", intentId,
+    "--session-id", sessionId,
+  ], { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const stdoutPromise = collect(child.stdout, child, "recovery action stdout");
+  const stderrPromise = collect(child.stderr, child, "recovery action stderr");
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("recovery action read timed out after 15000 ms"));
+    }, 15000);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (value) => { clearTimeout(timer); resolve(value); });
+  });
+  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+  if (code !== 0) {
+    fail(`recovery action read failed: ${stderr.trim().slice(0, 1000) || `exit code ${code}`}`);
+  }
+  let raw;
+  try {
+    raw = immutableJsonSnapshot(JSON.parse(stdout), "ledger recovery action");
+  } catch {
+    fail("recovery action read returned malformed JSON");
+  }
+  if (raw.schema_version !== 1 || raw.decision !== "RECONCILE_ONLY"
+      || raw.operation !== "browser-reconcile" || raw.recovery_session_id !== sessionId) {
+    fail("recovery action did not return the requested reconcile-only context");
+  }
+  const action = assertAction(raw.action);
+  if (assertSingleLine(action.reply_text, "recovery reply text") !== action.reply_text) {
+    fail("recovery reply text differs from the original normalized single-line action");
+  }
+  const preparation = raw.preparation;
+  const attempt = raw.attempt;
+  if (!preparation || preparation.test_only !== false || !attempt
+      || action.intent_id !== intentId || action.session_id === sessionId
+      || attempt.attempt_session_id !== action.session_id
+      || preparation.action_digest !== actionDigest(action)) {
+    fail("recovery action differs from its original immutable send binding");
+  }
+  for (const key of ["action_id", "permit_id", "reply_hash"]) {
+    if (preparation[key] !== action[key]) fail(`recovery preparation.${key} differs`);
+  }
+  if (digestObject(preparation.scope) !== digestObject(action.scope)
+      || attempt.action_id !== action.action_id
+      || attempt.preparation_id !== preparation.preparation_id) {
+    fail("recovery scope or preparation differs from the original send attempt");
+  }
+  for (const key of ["plan_digest", "preparation_id"]) {
+    if (!/^[0-9a-f]{64}$/u.test(requiredString(preparation[key], `recovery ${key}`))) {
+      fail(`recovery ${key} is not a SHA-256 digest`);
+    }
+  }
+  for (const key of ["claim_id", "preflight_id"]) requiredString(attempt[key], `recovery ${key}`);
+  if (!Number.isSafeInteger(preparation.baseline_total_reply_count)
+      || preparation.baseline_total_reply_count < 0) {
+    fail("recovery original reply baseline is invalid");
+  }
+  // Permit expiry deliberately does not grant or block read-only recovery.
+  return Object.freeze({ action, preparation, attempt });
+}
+
+function liveRecoveryRequest(rawRequest, allowReason) {
+  const request = immutableJsonSnapshot(rawRequest, "live recovery request");
+  const allowed = new Set(allowReason ? ["intentId", "sessionId", "reason"] : ["intentId", "sessionId"]);
+  if (!request || typeof request !== "object" || Array.isArray(request)
+      || Object.keys(request).some((key) => !allowed.has(key))) {
+    fail("live recovery accepts only intentId, sessionId and its recovery reason");
+  }
+  const intentId = requiredString(request.intentId, "live recovery intentId");
+  const sessionId = requiredString(request.sessionId, "live recovery sessionId");
+  const reason = request.reason ?? "browser_process_restarted";
+  if (!["browser_process_restarted", "receipt_capability_expired"].includes(reason)) {
+    fail("live recovery reason is unsupported");
+  }
+  return { intentId, sessionId, reason, key: JSON.stringify([intentId, sessionId]) };
+}
+
+async function inspectLiveReinspectionReceipt(tab, context, sessionId) {
+  const { action, preparation, attempt } = context;
+  const first = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
+  const observed = requireCompleteLiveSurface(await inspectLiveReplySurface(tab, action, "after"));
+  for (const key of ["observedUrl", "totalReplies", "ownReplyCount", "exactOwnCount"]) {
+    if (observed[key] !== first[key]) fail("live recovery evidence changed during reinspection");
+  }
+  if (await tab.url() !== observed.observedUrl) {
+    fail("live recovery left the verified reply URL during reinspection");
+  }
+  const exactOne = observed.exactOwnCount === 1 && observed.ownReplyCount === 1;
+  const absent = observed.ownReplyCount === 0
+    && observed.totalReplies >= preparation.baseline_total_reply_count;
+  return immutableJsonSnapshot({
+    schema_version: 1, test_only: false,
+    action_id: action.action_id, intent_id: action.intent_id, session_id: sessionId,
+    attempt_session_id: attempt.attempt_session_id,
+    scope: action.scope, comment_fingerprint: action.comment_fingerprint,
+    reply_hash: action.reply_hash, preparation_id: preparation.preparation_id,
+    claim_id: attempt.claim_id, preflight_id: attempt.preflight_id,
+    observed_url: observed.observedUrl, observed_at: nowIso(),
+    account_verified: true, post_verified: true, target_verified: true, parent_verified: true,
+    exact_reply_visible: exactOne, own_author_verified: exactOne,
+    absence_verified: absent, own_author_reply_count: observed.ownReplyCount,
+    reinspection_total_reply_count: observed.totalReplies,
+    evidence: `two fresh complete parent-scoped inspections found ${observed.exactOwnCount} exact own replies, ${observed.ownReplyCount} own replies and ${observed.totalReplies} total replies; original baseline ${preparation.baseline_total_reply_count}; recovery performed no submit or claim`,
+  }, "live reconcile receipt");
+}
+
+async function withPrivateRecoveryTab(context, inspect) {
+  const setupBrowserRuntime = await loadSetupBrowserRuntime();
+  const agent = await setupBrowserRuntime();
+  const browser = await agent.browsers.get("chrome");
+  const tab = await browser.tabs.new();
+  try {
+    bindLiveReplyBrowser(tab, browser);
+    await tab.goto(liveReplyUrl(context.action));
+    return await inspect(tab);
+  } finally {
+    try {
+      await Promise.race([tab.close(), new Promise((resolve) => setTimeout(resolve, 2000))]);
+    } catch {
+      // Tab cleanup never retries recovery, claim, receipt commit, or submission.
+    }
+  }
+}
+
+async function commitLiveReinspection(tab, context, request) {
+  const receipt = await inspectLiveReinspectionReceipt(tab, context, request.sessionId);
+  await requireLiveReplyPolicy();
+  const commit = await commitPythonLedgerBrowserReceipt(
+    context.claimSubmit, "browser-reconcile", receipt,
+  );
+  if (!commit.reconcile_required) liveReplyRecoveryContexts.delete(request.key);
+  return Object.freeze({ action_id: context.action.action_id, intent_id: request.intentId, ...commit });
+}
+
+async function recoverLiveApprovedReply(rawRequest) {
+  const request = liveRecoveryRequest(rawRequest, true);
+  if (liveReplyRecoveryInFlight.has(request.key) || liveReplyRecoveryContexts.has(request.key)) {
+    fail("live recovery is already active; use reconcileUncertainReply for fresh reinspection");
+  }
+  liveReplyRecoveryInFlight.add(request.key);
+  try {
+    await requireLiveReplyPolicy();
+    const original = await readLiveRecoveryAction(request.intentId, request.sessionId);
+    const claimSubmit = createPythonLedgerClaimSubmit({ preparation: original.preparation });
+    if (!isPythonLedgerClaimSubmit(claimSubmit)) fail("live recovery requires the default ledger bridge");
+    const context = Object.freeze({ ...original, claimSubmit });
+    return await withPrivateRecoveryTab(context, async (tab) => {
+      // Inspect before rotating authority, then inspect afresh before committing.
+      requireCompleteLiveSurface(await inspectLiveReplySurface(tab, original.action, "after"));
+      await requireLiveReplyPolicy();
+      const recovered = await recoverPythonLedgerReconcile(claimSubmit, request);
+      if (recovered.attempt_session_id !== original.attempt.attempt_session_id) {
+        fail("live recovery changed the original attempt session");
+      }
+      liveReplyRecoveryContexts.set(request.key, context);
+      return commitLiveReinspection(tab, context, request);
+    });
+  } finally {
+    liveReplyRecoveryInFlight.delete(request.key);
+  }
+}
+
+async function reconcileLiveUncertainReply(rawRequest) {
+  const request = liveRecoveryRequest(rawRequest, false);
+  const context = liveReplyRecoveryContexts.get(request.key);
+  if (!context) fail("live reconciliation requires a private active recovery context");
+  if (liveReplyRecoveryInFlight.has(request.key)) fail("live recovery is already in flight");
+  liveReplyRecoveryInFlight.add(request.key);
+  try {
+    await requireLiveReplyPolicy();
+    return await withPrivateRecoveryTab(context, (tab) => commitLiveReinspection(tab, context, request));
+  } finally {
+    liveReplyRecoveryInFlight.delete(request.key);
+  }
+}
 
 export function isPythonLedgerClaimSubmit(value) {
   return typeof value === "function" && pythonLedgerClaimSubmits.has(value);
@@ -662,12 +1124,30 @@ function createScanAndCommit(scanPost, {
 
 export function createCommentChromeActuator(options = {}) {
   const claimSubmit = options.claimSubmit;
+  const defaultLiveExecution = Object.keys(options).length === 0;
   const rawScanPost = createScanPost(options);
   const scanAndCommit = createScanAndCommit(rawScanPost, options);
   const send = createSendOperations({
     ...options,
     claimSubmit,
   });
+
+  async function executeApprovedReply(request) {
+    if (!defaultLiveExecution) {
+      fail("executeApprovedReply rejects custom actuator options and callbacks");
+    }
+    return executeLiveApprovedReply(request);
+  }
+
+  async function recoverApprovedReply(request) {
+    if (!defaultLiveExecution) fail("recoverApprovedReply rejects custom actuator options and callbacks");
+    return recoverLiveApprovedReply(request);
+  }
+
+  async function reconcileUncertainReply(request) {
+    if (!defaultLiveExecution) fail("reconcileUncertainReply rejects custom actuator options and callbacks");
+    return reconcileLiveUncertainReply(request);
+  }
 
   async function inspectResult(...args) {
     const receipt = await send.inspectResult(...args);
@@ -726,6 +1206,9 @@ export function createCommentChromeActuator(options = {}) {
   return Object.freeze({
     scanPost,
     scanAndCommit,
+    executeApprovedReply,
+    recoverApprovedReply,
+    reconcileUncertainReply,
     prepareReply: send.prepareReply,
     submitOnce: send.submitOnce,
     inspectResult,

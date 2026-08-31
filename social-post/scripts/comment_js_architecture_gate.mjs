@@ -69,7 +69,8 @@ async function buildInventory() {
   const selected = entries.filter((entry) => (
     entry.name.endsWith(".mjs")
       && (entry.name.startsWith("comment_chrome_")
-        || entry.name.startsWith("comment_js_architecture_"))
+        || entry.name.startsWith("comment_js_architecture_")
+        || entry.name === "comment_meta_snapshot_parser.mjs")
   ));
   const absoluteFiles = selected.map((entry) => {
     if (!entry.isFile()) {

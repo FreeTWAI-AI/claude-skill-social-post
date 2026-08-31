@@ -71,7 +71,7 @@ function runParserChecks(assertCheck) {
   ));
   const trustedBrowserClient = {
     kind: "dynamic",
-    specifier: "../../../plugins/cache/openai-bundled/chrome/26.818.41509/scripts/browser-client.mjs",
+    specifier: "../../../plugins/cache/openai-bundled/chrome/26.825.51511/scripts/browser-client.mjs",
     line: 1,
   };
   assertCheck("reviewed-browser-client-boundary-accepted", isReviewedExternalDynamicImport(
@@ -79,7 +79,7 @@ function runParserChecks(assertCheck) {
   ));
   assertCheck("browser-client-version-drift-rejected", !isReviewedExternalDynamicImport(
     "scripts/comment_chrome_runtime_authority.mjs",
-    { ...trustedBrowserClient, specifier: trustedBrowserClient.specifier.replace("26.818.41509", "drifted") },
+    { ...trustedBrowserClient, specifier: trustedBrowserClient.specifier.replace("26.825.51511", "drifted") },
   ));
   assertCheck("browser-client-source-drift-rejected", !isReviewedExternalDynamicImport(
     "scripts/other.mjs", trustedBrowserClient,
@@ -110,7 +110,7 @@ function runParserChecks(assertCheck) {
   assertCheck("reviewed-external-import-drift-rejected", (
     evaluateReviewedExternalImports([{
       ...exactExternal[0],
-      specifier: exactExternal[0].specifier.replace("26.818.41509", "drifted"),
+      specifier: exactExternal[0].specifier.replace("26.825.51511", "drifted"),
     }]).findings.some((item) => item.code === "reviewed-external-import-drift")
   ));
   assertCheck("reviewed-external-import-covered-by-graph-digest", (

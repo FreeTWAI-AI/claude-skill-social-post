@@ -3,7 +3,7 @@
   "document_role": "generated_public_projection",
   "canonical_source": ".rd/capability-ledger.json",
   "canonical_schema_version": 1,
-  "canonical_sha256": "fc20ab663d2b5aabbc0b1637436297f224ab0c2939fb58519e9122feb55efd67",
+  "canonical_sha256": "0cc67582cc7cf0d893424fde1cd91282e142222579bc5b6bc5db9f0892a67532",
   "release_version": "2.5.0",
   "release_state": "released",
   "source_revision_basis": "release-tag:v2.5.0",
@@ -75,7 +75,7 @@
       "scope": [
         "internal"
       ],
-      "next_experiment": "After the trusted host resolver and stable node/frame mapping are verified, connect controlled Chrome and run comment_fixture_browser_e2e.mjs for all three fixtures.",
+      "next_experiment": "Run comment_fixture_browser_e2e.mjs in a controlled Browser session as independent three-platform test-only quality evidence. Even a full PASS must remain promotion=false and cannot set status=verified, unlock a live successor, claim authenticated Meta authority, or enable live actuation.",
       "live_browser_actuation_enabled_by_default": false
     },
     {
@@ -86,7 +86,7 @@
       "scope": [
         "internal"
       ],
-      "next_experiment": "After both internal Chrome-host obligations and the three-platform fixture pass, run one authenticated read-only draft_only canary per platform and retain ledger receipts.",
+      "next_experiment": "After TRUSTED_CHROME_HOST_RESOLVER and STABLE_NODE_FRAME_MAPPING are genuinely verified, run one authenticated read-only draft_only canary per platform and retain ledger receipts. The test-only Browser fixture remains independent regression evidence and cannot satisfy or unlock this obligation.",
       "live_browser_actuation_enabled_by_default": false
     },
     {
@@ -112,5 +112,5 @@
       "live_browser_actuation_enabled_by_default": false
     }
   ],
-  "projection_payload_sha256": "54ad3fb50cdffba42e85c94e29d9f9952b9c297f6a62e97f73363a518c417c1f"
+  "projection_payload_sha256": "4b1b2b7dbe68c85dbf1245f6cd04e14b0f61282b6d7e540b52695b78370eb730"
 }

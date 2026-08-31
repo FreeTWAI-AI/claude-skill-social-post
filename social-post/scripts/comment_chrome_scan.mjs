@@ -20,6 +20,7 @@ import {
   attestTrustedPlatformExpansion,
   isTrustedPlatformScanPlan,
   requireTrustedPlatformScanPlan,
+  scanTrustedPlatformSnapshot,
   verifyTrustedExpansionStillComplete,
 } from "./comment_chrome_scan_adapters.mjs";
 
@@ -195,6 +196,13 @@ function createScanPostWithAuthority(
       );
       if (Object.prototype.hasOwnProperty.call(options, "threadExpansionComplete")) {
         fail("trusted scan expansion is actuator-attested; caller threadExpansionComplete is forbidden");
+      }
+      if (!isolatedTestOnly) {
+        if (testOnly) fail("a production live scan plan cannot emit test-only evidence");
+        return scanTrustedPlatformSnapshot(request, plan, {
+          clock,
+          maxComments: options.maxComments ?? 100,
+        });
       }
     } else {
       if (!testOnly) {

@@ -19,7 +19,7 @@ from comment_capability_gate import (
     validate_promotion_dependencies,
     validate_public_promotion_evidence,
 )
-from comment_capability_promotion import PROMOTION_DEPENDENCIES
+from comment_capability_promotion import PROMOTION_DEPENDENCIES, REQUIREMENTS
 
 
 def expect_rejected(check: Callable[[], None], label: str) -> None:
@@ -37,9 +37,23 @@ def rehash_projection(value: dict) -> None:
 def promotion_dependency_tests(rows: list[dict]) -> None:
     guarded = copy.deepcopy(rows)
     by_id = {row["id"]: row for row in guarded if row["id"] in PROMOTION_DEPENDENCIES}
-    for row in by_id.values():
-        row["status"] = "verified"
+    for obligation_id, row in by_id.items():
+        if REQUIREMENTS[obligation_id].get("promotion") is True:
+            row["status"] = "verified"
     validate_promotion_dependencies(guarded)
+    non_promotable = [
+        obligation_id
+        for obligation_id, requirement in REQUIREMENTS.items()
+        if requirement.get("promotion") is not True
+    ]
+    for obligation_id in non_promotable:
+        forbidden = copy.deepcopy(guarded)
+        forbidden_by_id = {row["id"]: row for row in forbidden}
+        forbidden_by_id[obligation_id]["status"] = "verified"
+        expect_rejected(
+            lambda candidate=forbidden: validate_promotion_dependencies(candidate),
+            f"non-promotable obligation {obligation_id} marked verified",
+        )
     for obligation_id, prerequisites in PROMOTION_DEPENDENCIES.items():
         for prerequisite in prerequisites:
             skipped = copy.deepcopy(guarded)

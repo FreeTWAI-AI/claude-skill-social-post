@@ -192,7 +192,11 @@ def validate_metric_qualifiers(record: dict[str, Any], label: str, errors: list[
 def _merge_changes(record: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(record)
     for key, value in changes.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
+        if (
+            key != "evidence_sha256"
+            and isinstance(value, dict)
+            and isinstance(result.get(key), dict)
+        ):
             result[key] = _merge_changes(result[key], value)
         else:
             result[key] = copy.deepcopy(value)
@@ -486,10 +490,11 @@ def validate_snapshots(
 
 def validate_account_snapshots(
     snapshots: list[dict[str, Any]], errors: list[str], warnings: list[str],
-) -> dict[str, dict[str, Any]]:
+) -> dict[tuple[str, int, str | None], dict[str, Any]]:
     """Validate rolling account-level insights without pretending they belong to a post."""
     seen: set[str] = set()
-    latest: dict[str, dict[str, Any]] = {}
+    latest: dict[tuple[str, int, str | None], dict[str, Any]] = {}
+    latest_order: dict[tuple[str, int, str | None], tuple[datetime, str]] = {}
     for index, snapshot in enumerate(snapshots, start=1):
         label = f"account_snapshots.jsonl:{index}"
         validate_schema_version(
@@ -518,16 +523,32 @@ def validate_account_snapshots(
             errors.append(f"{label} window_days must be a positive integer")
         if snapshot.get("captured_at_confidence") not in (None, *CONFIDENCE_VALUES):
             errors.append(f"{label} invalid captured_at_confidence {snapshot.get('captured_at_confidence')}")
+        measurement_surface = snapshot.get("measurement_surface")
+        if measurement_surface is not None and (
+            not isinstance(measurement_surface, str) or not measurement_surface.strip()
+        ):
+            errors.append(f"{label} measurement_surface must be a non-empty string or null")
+        _validate_snapshot_evidence(snapshot, label, errors)
         metrics = snapshot.get("metrics")
         if not isinstance(metrics, dict):
             errors.append(f"{label} metrics must be an object")
         else:
             non_negative_numbers(metrics, f"{label}.metrics", errors)
             validate_metric_qualifiers(snapshot, label, errors)
-        if platform in PLATFORM_VALUES and captured is not None:
-            previous = latest.get(platform)
-            if previous is None or parse_time(previous["captured_at"]) < captured:
-                latest[platform] = snapshot
+        if (
+            platform in PLATFORM_VALUES
+            and captured is not None
+            and isinstance(window_days, int)
+            and not isinstance(window_days, bool)
+            and window_days >= 1
+            and (measurement_surface is None or isinstance(measurement_surface, str))
+        ):
+            surface = measurement_surface.strip() if isinstance(measurement_surface, str) else None
+            key = (platform, window_days, surface)
+            order = (captured, str(snapshot_id or ""))
+            if key not in latest_order or latest_order[key] < order:
+                latest[key] = snapshot
+                latest_order[key] = order
     return latest
 
 

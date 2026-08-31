@@ -4,11 +4,16 @@
 
 目前穩定標籤：**v2.5.0**；`main` 已同步 **Unreleased candidate**。
 
-Unreleased candidate 已完成 41 個 JavaScript 模組的封閉清單、103 條 internal static edge、1 條精確審核的 external lazy boundary、0 cycle／0 failure、80 項 architecture 自校準檢查與 22 項固定 actuator runner cases。這些是本機 contract 與 localhost test-only 證據，不代表 live Meta 回覆已解鎖。
+Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime revision／雜湊、架構自校準與單次送出／異常恢復的回歸測試。這些是本機 contract 與 localhost test-only 證據，不代表三平台 live Meta 回覆已解鎖。
 
-> v2.5.0 是 default-disabled 安全預覽版。正式 policy 的 `live_browser_actuation_enabled` 預設為 `false`；在受控 Browser fixture、三平台登入後 draft-only 與各平台一則核准 canary 通過前，live scan completion、begin、click、finish、reconcile 都不開放。
+> `main` 已分開掃描與送出開關：受控、指定 scope 的來源綁定掃描可用；`live_browser_actuation_enabled` 仍預設為 `false`。真實送出／結果回讀未完成三平台 canary，不能宣稱全面自動回覆已完成。
 
 ## Unreleased on main
+
+- 新增 default-only `executeApprovedReply` 候選入口與 read-only recovery，拒絕 caller tab／action／selector／callback；原核准文字、帳號、貼文、留言及原 attempt 都必須一致。
+- 更新 Codex Chrome runtime 固定版本至 `26.825.51511`，保留 bytes／SHA-256 驗證。
+- Threads 的指定樣本已核對原留言、完整本文、帳號、零回覆與回覆視窗；未實際送出。FB 僅完成既有自己回覆的辨識，完整展開與 composer actor 未驗證，因此禁止送出；IG live reply adapter 尚未完成。
+- 公開版本只含通用程式與匿名測試。真實留言、草稿、帳號洞察、原文、照片與私人憑證不在發布範圍內。
 
 - 結構化分析不只保存成效數字，也保存原文 SHA、確定性長度、版型／黑底白字屬性、關鍵字、實體、數字語言、voice、CTA、完整 Unicode 標點，以及日期、星期、`HH:mm` 與 daypart。
 - 新增 `coverage` gate，逐篇證明完整原文、長度、版型、關鍵字、語氣、標點、發文時間與 outcome 確實進入 feature matrix；每個適用的平台 analytics 子樹另有 exact-compare 維度，未被固定 schema 命名的新欄位也會進 `extended_analytics`，低信心 placeholder 不會混入規律。
@@ -77,7 +82,7 @@ Copy-Item content_plan.example.md content_plan.md
 
 ## Comment Ops 快速開始
 
-P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供 24/7 背景監聽或無邊界的全自動模式。v2.5.0 的 live ledger mutation 另由 default-off kill switch 擋住；即使使用者核准回覆也不會繞過。未來實際掃描與送出還需要執行環境提供 `chrome:control-chrome`、使用者已開啟的 Chrome、既有登入狀態與通過驗證的平台 adapter；目前仍可使用草稿、政策、ledger 與測試功能。
+P5 不串 Meta API，也不匯出 Chrome Cookie 或 session。預設是 `batch_confirm`，不提供 24/7 背景監聽或無邊界全自動模式。`main` 的受控掃描與送出採獨立政策；核准回覆不會繞過 default-off 送出開關。實際 Chrome 操作需要 `chrome:control-chrome`、使用者既有登入狀態與來源綁定 adapter。候選送出／唯讀恢復入口的存在不代表已通過真實 canary。
 
 Codex 與 Claude Code 都能使用 P0–P4、P5 的離線草稿／政策／ledger／測試功能。現有 existing-session Chrome runtime 則固定依賴 Codex bundled Chrome revision；Claude Code 或獨立公開 clone 找不到精確 runtime 時會 fail closed，不會改走未審核的瀏覽器路徑，也不代表 Claude 安裝已具備 live Meta 控制能力。
 

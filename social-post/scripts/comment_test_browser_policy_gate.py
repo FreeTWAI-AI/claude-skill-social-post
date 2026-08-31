@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Default-deny policy tests for every live Chrome ledger mutation boundary."""
+"""Policy tests for enabled read scans and default-denied live send boundaries."""
 
 from __future__ import annotations
 
@@ -78,20 +78,27 @@ def _approved_fixture(root: Path, platform: str) -> tuple[Path, LocalFixtureComm
     return script, adapter, action
 
 
-def check_browser_scan_default_denied() -> None:
-    with tempfile.TemporaryDirectory(prefix="social-browser-scan-disabled-") as raw:
+def check_browser_scan_default_enabled() -> None:
+    with tempfile.TemporaryDirectory(prefix="social-browser-scan-enabled-") as raw:
         root = Path(raw)
         script, _unused = prepare_cli_fixture(root)
         envelope = scan_envelope(LocalFixtureCommentAdapter("instagram"))
         request = create_scan_request(script, root, envelope)
         envelope = bind_scan_request(envelope, request)
-        source = root / "browser-scan-disabled.json"
+        source = root / "browser-scan-enabled.json"
         write_json(source, scan_provenance_envelope(root, request, envelope))
         args = ("browser-scan", str(source), *browser_scan_args(request))
         preview = run_cli(script, root, *args)
         if "DRY_RUN valid" not in preview.stdout:
             raise AssertionError("disabled live scan was not available as a safe preview")
-        _assert_write_denied_without_mutation(script, root, *args)
+        completed = run_cli(script, root, *args, "--write")
+        if "SCAN_COMMIT" not in completed.stdout:
+            raise AssertionError("enabled live scan did not emit a durable commit receipt")
+        rows = (root / "data" / "comment_events.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if len(rows) != 1:
+            raise AssertionError("enabled live scan did not append exactly one observation")
 
 
 def check_browser_begin_default_denied() -> None:
@@ -158,7 +165,7 @@ def check_browser_reconcile_default_denied() -> None:
 
 
 def run_browser_policy_gate_tests() -> None:
-    check_browser_scan_default_denied()
+    check_browser_scan_default_enabled()
     check_browser_begin_default_denied()
     check_browser_finish_default_denied()
     check_browser_reconcile_default_denied()

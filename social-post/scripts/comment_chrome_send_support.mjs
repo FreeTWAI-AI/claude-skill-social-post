@@ -199,6 +199,19 @@ export function assertStableNodeSurface(tab, preparation) {
   return surface;
 }
 
+/** Read-only binding of an already verified, source-owned live submit locator. */
+export async function bindObservedSubmitNode(tab, locator) {
+  const surface = requireDomCuaSurface(tab);
+  const first = captureDomCuaSnapshot(await surface.get_visible_dom());
+  const identity = await readStableSubmitIdentity(locator);
+  const nodeId = bindExactVisibleNode(first, identity);
+  const second = captureDomCuaSnapshot(await surface.get_visible_dom());
+  if (bindExactVisibleNode(second, identity) !== nodeId) {
+    fail("live submit node changed during read-only binding");
+  }
+  return nodeId;
+}
+
 export function assertAction(action) {
   if (!action || typeof action !== "object") fail("action must be an object");
   for (const key of ["action_id", "intent_id", "session_id", "permit_id", "comment_fingerprint", "reply_hash"]) {

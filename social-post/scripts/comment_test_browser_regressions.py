@@ -56,9 +56,15 @@ def scan_payload(adapter: LocalFixtureCommentAdapter, request: dict) -> dict:
     comment = adapter.scan()
     observed_at = now_iso()
     page_url = request["post_permalink"]
+    comment_permalink = f"{page_url}/comment/{comment['platform_comment_id']}"
+    if request["platform"] == "threads":
+        author = comment.get("author_key") or comment.get("author_display") or "fixture_author"
+        comment_permalink = (
+            f"https://www.threads.com/@{author}/post/{comment['platform_comment_id']}"
+        )
     comment.update({
         "post_permalink": page_url,
-        "comment_permalink": f"{page_url}/comment/{comment['platform_comment_id']}",
+        "comment_permalink": comment_permalink,
         "observed_parent_post_permalink": page_url,
         "observed_at": observed_at,
     })

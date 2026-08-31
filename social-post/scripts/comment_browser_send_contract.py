@@ -6,7 +6,8 @@ from __future__ import annotations
 from typing import Any
 
 from comment_browser_common import (
-    _json_digest, _require_live_receipt, _require_post_url, _require_recent_observation,
+    _json_digest, _require_comment_permalink_for_post, _require_live_receipt,
+    _require_platform_url, _require_post_url, _require_recent_observation,
     _require_schema_version, _required_digest,
     _required_boolean, _required_string,
 )
@@ -89,7 +90,14 @@ def build_browser_action(
     if permit.get("session_id") != session_id:
         raise ValueError("browser action session does not match approval permit")
     _require_no_scope_reconciliation(states, state, intent_id, session_id)
-    comment = latest_comments[comment_key]
+    return _browser_action_from_ledger(latest_comments[comment_key], state, intent_id, session_id)
+
+
+def _browser_action_from_ledger(
+    comment: dict[str, Any], state: dict[str, Any], intent_id: str, session_id: str,
+) -> dict[str, Any]:
+    """Construct the unchanged action shape; callers enforce their own state gate."""
+    permit = state.get("permit") or {}
     draft = state["draft"]
     anchor = {
         "platform_comment_id": comment.get("platform_comment_id"),
@@ -117,6 +125,80 @@ def build_browser_action(
     return {
         **action,
         **browser_action_provenance_fields(action, draft, comment),
+    }
+
+
+def build_browser_recovery_action(
+    latest_comments: dict[str, dict[str, Any]], states: dict[str, dict[str, Any]],
+    intent_id: str, session_id: str, *, reply_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Read the exact original action for reinspection, without creating authority."""
+    comment_key, state = _find_intent(states, intent_id)
+    if state.get("status") not in {"send_started", "needs_reconcile"}:
+        raise ValueError("browser recovery action requires an authoritative uncertain send")
+    attempt = state.get("attempt") or {}
+    attempt_session_id = _required_string(attempt, "session_id")
+    recovery_session_id = _required_string({"session_id": session_id}, "session_id")
+    issuer = state.get("reconcile_capability") or state.get("last_event") or {}
+    if recovery_session_id in {
+        attempt_session_id, issuer.get("browser_reconcile_authorized_session_id"),
+    }:
+        raise ValueError("browser recovery action requires a fresh current session")
+    permit_id = _required_string(attempt, "permit_id")
+    original_approvals = [
+        row for row in reply_rows
+        if row.get("event_type") == "approved" and row.get("intent_id") == intent_id
+        and row.get("permit_id") == permit_id and row.get("session_id") == attempt_session_id
+    ]
+    if len(original_approvals) != 1:
+        raise ValueError("browser recovery requires one original approval for the send attempt")
+    comment = latest_comments[comment_key]
+    attempt_scope = attempt.get("scope")
+    if not isinstance(attempt_scope, dict):
+        raise ValueError("browser recovery send attempt has no original scope")
+    for key in ("platform", "account_key", "post_key", "comment_key"):
+        if comment.get(key) != _required_string(attempt_scope, key):
+            raise ValueError(f"browser recovery comment {key} differs from the original scope")
+    # Replay consumes the permit at send_started. Reconstruct from the original
+    # approval only in this temporary view; never restore an approved state.
+    recovery_state = {**state, "permit": original_approvals[0]}
+    action = _browser_action_from_ledger(comment, recovery_state, intent_id, attempt_session_id)
+    action_digest = _required_digest(attempt, "browser_action_digest")
+    if _json_digest(action) != action_digest:
+        raise ValueError("browser recovery action digest differs from the original send attempt")
+    for action_key, attempt_key in (
+        ("action_id", "browser_action_id"), ("permit_id", "permit_id"),
+        ("reply_hash", "reply_hash"), ("comment_fingerprint", "comment_fingerprint"),
+        ("scope", "scope"),
+    ):
+        if action.get(action_key) != attempt.get(attempt_key):
+            raise ValueError(f"browser recovery {action_key} differs from the original send attempt")
+    _require_post_url(
+        comment["platform"], _required_string(comment, "observed_parent_post_permalink"),
+        action["post_permalink"], "observed_parent_post_permalink",
+    )
+    baseline = _require_non_negative_integer(
+        attempt.get("browser_baseline_total_reply_count"),
+        "browser recovery attempt has no valid baseline total reply count",
+    )
+    preparation_id = _required_digest(attempt, "browser_preparation_id")
+    return {
+        "schema_version": 1, "decision": "RECONCILE_ONLY", "operation": "browser-reconcile",
+        "recovery_session_id": recovery_session_id,
+        "action": action,
+        "preparation": {
+            "test_only": False, "action_id": action["action_id"],
+            "permit_id": action["permit_id"], "reply_hash": action["reply_hash"],
+            "scope": action["scope"], "action_digest": action_digest,
+            "plan_digest": _required_digest(attempt, "browser_plan_digest"),
+            "preparation_id": preparation_id, "baseline_total_reply_count": baseline,
+        },
+        "attempt": {
+            "action_id": action["action_id"], "preparation_id": preparation_id,
+            "claim_id": _required_string(attempt, "browser_submit_claim_id"),
+            "preflight_id": _required_string(attempt, "browser_preflight_id"),
+            "attempt_session_id": attempt_session_id,
+        },
     }
 
 
@@ -174,6 +256,30 @@ def _require_preparation_binding(
     }
 
 
+def _require_send_observed_url(comment: dict[str, Any], observed_url: str) -> str:
+    """Allow only the approved post or its exact stored Threads reply anchor.
+
+    Threads reply pages show the original parent and target comment together.
+    Their separate path is acceptable only when the ledger already binds that
+    exact query-free anchor to the approved parent; receipt fields cannot add a
+    new target. Other platforms retain the original post-only rule.
+    """
+    platform = comment["platform"]
+    post_permalink = comment["post_permalink"]
+    if platform == "threads" and comment.get("comment_permalink"):
+        stored_anchor = _require_comment_permalink_for_post(
+            platform, _required_string(comment, "comment_permalink"), post_permalink,
+        )
+        current = _require_platform_url(platform, observed_url, "observed_url")
+        if current == stored_anchor:
+            _require_post_url(
+                platform, _required_string(comment, "observed_parent_post_permalink"),
+                post_permalink, "observed_parent_post_permalink",
+            )
+            return current
+    return _require_post_url(platform, observed_url, post_permalink, "observed_url")
+
+
 def validate_browser_preflight(
     raw: dict[str, Any], latest_comments: dict[str, dict[str, Any]],
     states: dict[str, dict[str, Any]], policy: dict[str, Any],
@@ -194,10 +300,7 @@ def validate_browser_preflight(
     comment = latest_comments[comment_key]
     _require_action_binding(raw, state, comment, intent_id, session_id)
     expected_action = build_browser_action(latest_comments, states, intent_id, session_id)
-    _require_post_url(
-        comment["platform"], _required_string(raw, "observed_url"),
-        comment["post_permalink"], "observed_url",
-    )
+    _require_send_observed_url(comment, _required_string(raw, "observed_url"))
     observed_at = _require_recent_observation(
         raw, policy, "maximum_browser_preflight_age_seconds", 60, "browser preflight",
     )
@@ -270,10 +373,7 @@ def classify_browser_result(
         raise ValueError("browser result identity differs from current action")
     comment = latest_comments[comment_key]
     _result_scope_matches(raw, state, comment)
-    _require_post_url(
-        comment["platform"], _required_string(raw, "observed_url"),
-        comment["post_permalink"], "observed_url",
-    )
+    _require_send_observed_url(comment, _required_string(raw, "observed_url"))
     observed_at = _require_recent_observation(
         raw, policy, "maximum_browser_result_age_seconds", 300, "browser result",
     )
@@ -359,10 +459,7 @@ def classify_browser_reinspection(
         raise ValueError("browser reinspection attempt_session_id differs from send attempt")
     comment = latest_comments[comment_key]
     _result_scope_matches(raw, state, comment)
-    _require_post_url(
-        comment["platform"], _required_string(raw, "observed_url"),
-        comment["post_permalink"], "observed_url",
-    )
+    _require_send_observed_url(comment, _required_string(raw, "observed_url"))
     observed_at = _require_recent_observation(
         raw, policy, "maximum_browser_result_age_seconds", 300,
         "browser reinspection",

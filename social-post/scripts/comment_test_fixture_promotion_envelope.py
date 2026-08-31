@@ -113,6 +113,12 @@ def run_fixture_promotion_envelope_tests(
         OBLIGATION_ID, envelope, version, revision, root,
         calibration_only=True, now=FIXED_NOW,
     )
+    _expect_rejected(
+        lambda: validate_promotion_receipt(
+            OBLIGATION_ID, envelope, version, revision, root, now=FIXED_NOW,
+        ),
+        "promotion=false fixture accepted as production capability",
+    )
     validate_envelope_binding(envelope, raw, raw_sha256)
 
     wrong_raw_hash = copy.deepcopy(envelope)

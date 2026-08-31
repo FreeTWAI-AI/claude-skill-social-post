@@ -15,7 +15,8 @@ from pathlib import Path
 from social_data import (
     _coverage_dimensions, _coverage_expectations, _materialized_snapshots,
     comparables_context, feature_coverage_report, feature_matrix,
-    latest_aggregation_snapshots, render_comparables_context, series_summary,
+    latest_aggregation_snapshots, provenance_coverage_report,
+    render_comparables_context, series_summary,
 )
 from social_post_analysis import caption_counts
 from social_store import write_jsonl
@@ -90,6 +91,7 @@ def _snapshot(
     aggregation_eligible: bool | None = None,
     measurement_status: str | None = None,
 ) -> dict:
+    evidence_path = f"C:/fixture/{snapshot_id}.jpg"
     row = {
         "schema_version": "1.0",
         "snapshot_id": snapshot_id,
@@ -99,6 +101,10 @@ def _snapshot(
         "captured_at_confidence": "high",
         "maturity": maturity,
         "metrics": {"viewers": viewers, "comments": viewers // 10},
+        "evidence": [evidence_path],
+        "evidence_sha256": {
+            evidence_path: hashlib.sha256(snapshot_id.encode("utf-8")).hexdigest(),
+        },
         "metric_scope_notes": {"viewers": "synthetic exact fixture"},
         "platform_breakdown": {"viewers": {platform: viewers}},
         "surface_observations": [{
@@ -126,6 +132,23 @@ def _snapshot(
     if measurement_status is not None:
         row["measurement_status"] = measurement_status
     return row
+
+
+def _account_snapshot(snapshot_id: str, surface: str, views: int) -> dict:
+    evidence_path = f"C:/fixture/{snapshot_id}.jpg"
+    return {
+        "schema_version": "1.0",
+        "account_snapshot_id": snapshot_id,
+        "platform": "instagram",
+        "captured_at": "2026-08-29T16:00:00+08:00",
+        "window_days": 30,
+        "measurement_surface": surface,
+        "metrics": {"views": views},
+        "evidence": [evidence_path],
+        "evidence_sha256": {
+            evidence_path: hashlib.sha256(snapshot_id.encode("utf-8")).hexdigest(),
+        },
+    }
 
 
 def _fixture(root: Path) -> None:
@@ -158,6 +181,10 @@ def _fixture(root: Path) -> None:
             "2026-08-29T15:00:00+08:00", "developing", 999,
             measurement_status="awaiting_data",
         ),
+    ])
+    write_jsonl(data / "account_snapshots.jsonl", [
+        _account_snapshot("account-overview", "account_overview", 100),
+        _account_snapshot("account-rankings", "reel_rankings", 200),
     ])
 
 
@@ -356,6 +383,19 @@ def _assert_coverage_report(root: Path) -> None:
         raise AssertionError(f"complete fixture failed coverage audit: {report}")
     if report["eligible_post_count"] != 1 or report["covered_post_count"] != 1:
         raise AssertionError(f"coverage counts drifted: {report}")
+    provenance = report["provenance"]
+    if report["provenance_complete"] is not True or provenance["complete"] is not True:
+        raise AssertionError(f"complete evidence manifests failed provenance audit: {provenance}")
+    if (
+        provenance["checked_record_count"] != 8
+        or provenance["insight_snapshot_count"] != 6
+        or provenance["account_snapshot_count"] != 2
+        or provenance["complete_record_count"] != 8
+    ):
+        raise AssertionError(f"provenance coverage did not check every ledger row: {provenance}")
+    serialized_report = json.dumps(report, ensure_ascii=False)
+    if "C:/fixture/" in serialized_report or "測試 AI 版型！" in serialized_report:
+        raise AssertionError("coverage report leaked a caption or private evidence path")
     row = report["posts"][0]
     if not all(row["dimensions"].values()) or row["missing"]:
         raise AssertionError(f"eligible post lost a feature dimension: {row}")
@@ -394,6 +434,18 @@ def _assert_coverage_report(root: Path) -> None:
     for key in expected_dimensions - {"outcome:monetization"}:
         if dimensions[key] is not True:
             raise AssertionError(f"unrelated extended subtree failed after mutation: {key}")
+
+    incomplete_snapshots = deepcopy(_materialized_snapshots(root))
+    incomplete_snapshots[0].pop("evidence_sha256")
+    incomplete_provenance = provenance_coverage_report(
+        incomplete_snapshots,
+        [
+            _account_snapshot("account-overview", "account_overview", 100),
+            _account_snapshot("account-rankings", "reel_rankings", 200),
+        ],
+    )
+    if incomplete_provenance["complete"] is not False:
+        raise AssertionError("provenance coverage accepted a missing insight digest manifest")
 
 
 def _assert_deterministic_cli(root: Path) -> None:

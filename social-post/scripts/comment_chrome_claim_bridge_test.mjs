@@ -113,6 +113,56 @@ const productionActor = actuatorFacadeModule.createCommentChromeActuator({
 assert.equal(productionActor.recoverReceipt, undefined);
 assert.equal(productionActor.receiptCapability, undefined);
 assert.equal(JSON.stringify(productionActor).includes("nonce"), false);
+for (const method of ["recoverApprovedReply", "reconcileUncertainReply"]) {
+  assert.equal(typeof productionActor[method], "function");
+  await assert.rejects(
+    () => productionActor[method]({ intentId: "uncertain-intent", sessionId: "fresh-session" }),
+    /rejects custom actuator options and callbacks/u,
+  );
+}
+const defaultRecoveryActor = actuatorFacadeModule.createCommentChromeActuator();
+for (const [method, extra] of [
+  ["recoverApprovedReply", { action: {} }],
+  ["recoverApprovedReply", { tab: {} }],
+  ["recoverApprovedReply", { preparation: {} }],
+  ["recoverApprovedReply", { root: "another-ledger" }],
+  ["reconcileUncertainReply", { receipt: {} }],
+]) {
+  await assert.rejects(
+    () => defaultRecoveryActor[method]({ intentId: "uncertain-intent", sessionId: "fresh-session", ...extra }),
+    /live recovery accepts only/u,
+  );
+}
+await assert.rejects(
+  () => defaultRecoveryActor.recoverApprovedReply({
+    intentId: "uncertain-intent", sessionId: "fresh-session", reason: "retry_submit",
+  }),
+  /live recovery reason is unsupported/u,
+);
+await assert.rejects(
+  () => defaultRecoveryActor.reconcileUncertainReply({
+    intentId: "uncertain-intent", sessionId: "fresh-session",
+  }),
+  /private active recovery context/u,
+);
+const bridgeSource = await readFile(new URL("./comment_chrome_claim_bridge.mjs", import.meta.url), "utf8");
+const recoverySourceStart = bridgeSource.indexOf("async function readLiveRecoveryAction(");
+const recoverySourceEnd = bridgeSource.indexOf("export function isPythonLedgerClaimSubmit(", recoverySourceStart);
+assert.ok(recoverySourceStart > 0 && recoverySourceEnd > recoverySourceStart);
+const liveRecoverySource = bridgeSource.slice(recoverySourceStart, recoverySourceEnd);
+assert.match(liveRecoverySource, /DEFAULT_SCRIPT, "browser-recovery-action"/u);
+assert.match(liveRecoverySource, /shell: false, windowsHide: true/u);
+assert.match(liveRecoverySource, /preparation\.action_digest !== actionDigest\(action\)/u);
+assert.match(liveRecoverySource, /loadSetupBrowserRuntime\(\)/u);
+assert.match(liveRecoverySource, /recoverPythonLedgerReconcile\(claimSubmit, request\)/u);
+assert.match(liveRecoverySource, /context\.claimSubmit, "browser-reconcile", receipt/u);
+assert.match(liveRecoverySource, /liveReplyRecoveryContexts\.set\(request\.key, context\)/u);
+assert.match(liveRecoverySource, /liveReplyRecoveryContexts\.delete\(request\.key\)/u);
+assert.doesNotMatch(liveRecoverySource, /\.(?:click|fill|press)\s*\(/u);
+assert.doesNotMatch(liveRecoverySource, /\b(?:claimRequest|validateWriteDecision|runPythonClaim|submitLiveReplyAndFinish|prepareLiveReply)\s*\(/u);
+assert.doesNotMatch(liveRecoverySource, /\bclaimSubmit\s*\(/u);
+assert.doesNotMatch(liveRecoverySource, /inspectLiveReplySurface\([^\n]*"before"/u);
+assert.doesNotMatch(liveRecoverySource, /requireCurrentReplyPermit\(/u);
 const forgedRecovery = Object.freeze({
   schema_version: 1, decision: "RECONCILE_ONLY", operation: "browser-reconcile",
   intent_id: preparation.intent_id, action_id: preparation.action_id,

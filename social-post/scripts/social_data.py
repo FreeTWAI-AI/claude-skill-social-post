@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
 from social_store import load_jsonl, store_revision
-from social_post_analysis import punctuation_profile
+from social_post_analysis import HEX_256, punctuation_profile
 from social_validation import (
     MATURITY_VALUES, PLATFORM_VALUES, materialize_corrections, parse_time,
     validate_account_snapshots, validate_experiments, validate_posts, validate_snapshots,
@@ -123,6 +124,24 @@ def validation_json_view(result: dict[str, Any]) -> dict[str, Any]:
             }
             for (post_id, platform), snapshot in sorted(by_platform.items())
         ]
+    latest_accounts = result.get("latest_account_snapshots", {})
+    if isinstance(latest_accounts, dict):
+        value["latest_account_snapshots"] = [
+            {
+                "platform": platform,
+                "window_days": window_days,
+                "measurement_surface": measurement_surface,
+                "snapshot": snapshot,
+            }
+            for (platform, window_days, measurement_surface), snapshot in sorted(
+                latest_accounts.items(),
+                key=lambda item: (
+                    item[0][0], item[0][1], item[0][2] or "",
+                    item[1].get("captured_at") or "",
+                    item[1].get("account_snapshot_id") or "",
+                ),
+            )
+        ]
     return value
 
 
@@ -187,6 +206,132 @@ def _materialized_snapshots(root: Path) -> list[dict[str, Any]]:
     if errors:
         raise ValueError("; ".join(errors))
     return snapshots
+
+
+def _materialized_account_snapshots(root: Path) -> list[dict[str, Any]]:
+    """Load every corrected account snapshot, not only the latest index entries."""
+    data = root / "data"
+    errors: list[str] = []
+    _posts, _snapshots, accounts = materialize_corrections(
+        load_jsonl(data / POSTS_FILE.name),
+        load_jsonl(data / SNAPSHOTS_FILE.name),
+        load_jsonl(data / ACCOUNT_SNAPSHOTS_FILE.name),
+        load_jsonl(data / CORRECTIONS_FILE.name),
+        errors,
+    )
+    if errors:
+        raise ValueError("; ".join(errors))
+    return accounts
+
+
+def _looks_like_file_evidence(value: str) -> bool:
+    """Distinguish persisted file references from a plain-language evidence note."""
+    normalized = value.replace("\\", "/")
+    return Path(normalized).suffix.casefold() in {
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic",
+        ".mp4", ".mov", ".pdf", ".json", ".csv", ".tsv",
+    }
+
+
+def _provenance_record(
+    record: dict[str, Any], *, record_type: str, record_id_key: str,
+) -> dict[str, Any]:
+    """Audit one private evidence manifest without returning paths, captions, or digests."""
+    evidence = record.get("evidence")
+    hashes = record.get("evidence_sha256")
+    evidence_shape_valid = (
+        isinstance(evidence, list)
+        and bool(evidence)
+        and all(isinstance(item, str) and bool(item.strip()) for item in evidence)
+        and len(evidence) == len(set(evidence))
+    )
+    references = evidence if isinstance(evidence, list) else []
+    file_references = [
+        item for item in references
+        if isinstance(item, str) and _looks_like_file_evidence(item)
+    ]
+    manifest_required = bool(file_references)
+    manifest_complete = (
+        isinstance(hashes, dict)
+        and set(hashes) == set(references)
+        and all(
+            isinstance(path, str)
+            and isinstance(digest, str)
+            and HEX_256.fullmatch(digest)
+            for path, digest in hashes.items()
+        )
+    )
+    source_files_available = 0
+    source_files_verified = 0
+    source_file_digest_mismatches = 0
+    if isinstance(hashes, dict):
+        for source in file_references:
+            path = Path(source)
+            if not path.is_file():
+                continue
+            source_files_available += 1
+            observed = hashlib.sha256(path.read_bytes()).hexdigest()
+            if hashes.get(source) == observed:
+                source_files_verified += 1
+            else:
+                source_file_digest_mismatches += 1
+    complete = (
+        evidence_shape_valid
+        and (not manifest_required or manifest_complete)
+        and source_file_digest_mismatches == 0
+    )
+    return {
+        "record_type": record_type,
+        "record_id": record.get(record_id_key),
+        "evidence_reference_count": len(references),
+        "file_evidence_reference_count": len(file_references),
+        "digest_entry_count": len(hashes) if isinstance(hashes, dict) else 0,
+        "manifest_required": manifest_required,
+        "manifest_complete": manifest_complete if manifest_required else None,
+        "source_files_available": source_files_available,
+        "source_files_verified": source_files_verified,
+        "source_file_digest_mismatches": source_file_digest_mismatches,
+        "complete": complete,
+    }
+
+
+def provenance_coverage_report(
+    insight_snapshots: list[dict[str, Any]],
+    account_snapshots: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Check every materialized outcome record while keeping private provenance private."""
+    records = [
+        _provenance_record(
+            snapshot, record_type="insight_snapshot", record_id_key="snapshot_id",
+        )
+        for snapshot in insight_snapshots
+    ] + [
+        _provenance_record(
+            snapshot, record_type="account_snapshot", record_id_key="account_snapshot_id",
+        )
+        for snapshot in account_snapshots
+    ]
+    complete_count = sum(record["complete"] for record in records)
+    return {
+        "complete": complete_count == len(records),
+        "checked_record_count": len(records),
+        "complete_record_count": complete_count,
+        "insight_snapshot_count": len(insight_snapshots),
+        "account_snapshot_count": len(account_snapshots),
+        "evidence_reference_count": sum(
+            record["evidence_reference_count"] for record in records
+        ),
+        "file_evidence_reference_count": sum(
+            record["file_evidence_reference_count"] for record in records
+        ),
+        "digest_entry_count": sum(record["digest_entry_count"] for record in records),
+        "source_files_available": sum(record["source_files_available"] for record in records),
+        "source_files_verified": sum(record["source_files_verified"] for record in records),
+        "source_file_digest_mismatches": sum(
+            record["source_file_digest_mismatches"] for record in records
+        ),
+        "records": records,
+    }
 
 
 def _has_aggregation_measurement(snapshot: dict[str, Any]) -> bool:
@@ -625,7 +770,7 @@ def _coverage_row(
 
 
 def feature_coverage_report(root: Path) -> dict[str, Any]:
-    """Prove every eligible post survives the matrix join without exposing captions."""
+    """Prove feature and evidence preservation without exposing captions or source paths."""
     result = validate_store(root)
     if result["errors"]:
         raise ValueError("; ".join(result["errors"]))
@@ -634,6 +779,7 @@ def feature_coverage_report(root: Path) -> dict[str, Any]:
         if post.get("analysis_status") == "complete" and post.get("analysis_eligible") is True
     ), key=lambda value: value["post_id"])
     materialized_snapshots = _materialized_snapshots(root)
+    materialized_accounts = _materialized_account_snapshots(root)
     snapshots_by_id = {
         snapshot["snapshot_id"]: snapshot for snapshot in materialized_snapshots
         if isinstance(snapshot.get("snapshot_id"), str)
@@ -646,11 +792,18 @@ def feature_coverage_report(root: Path) -> dict[str, Any]:
         for post in eligible_posts
     ]
     covered = sum(row["complete"] for row in coverage_rows)
+    feature_complete = covered == len(coverage_rows)
+    provenance = provenance_coverage_report(
+        materialized_snapshots, materialized_accounts,
+    )
     return {
-        "coverage_complete": covered == len(coverage_rows),
+        "coverage_complete": feature_complete and provenance["complete"],
+        "feature_coverage_complete": feature_complete,
+        "provenance_complete": provenance["complete"],
         "eligible_post_count": len(coverage_rows),
         "covered_post_count": covered,
         "posts": coverage_rows,
+        "provenance": provenance,
     }
 
 
@@ -795,7 +948,9 @@ def render_feature_coverage(report: dict[str, Any]) -> str:
     output = [
         (
             f"coverage_complete={str(report['coverage_complete']).lower()} "
-            f"covered={report['covered_post_count']}/{report['eligible_post_count']}"
+            f"features={report['covered_post_count']}/{report['eligible_post_count']} "
+            f"provenance={report['provenance']['complete_record_count']}/"
+            f"{report['provenance']['checked_record_count']}"
         )
     ]
     for row in report["posts"]:
@@ -803,6 +958,12 @@ def render_feature_coverage(report: dict[str, Any]) -> str:
         missing = ",".join(row["missing"]) if row["missing"] else "none"
         output.append(
             f"{status} {row['post_id']} snapshots={row['snapshot_count']} missing={missing}"
+        )
+    for row in report["provenance"]["records"]:
+        status = "PASS" if row["complete"] else "FAIL"
+        output.append(
+            f"{status} provenance {row['record_type']} {row['record_id']} "
+            f"evidence={row['evidence_reference_count']} digests={row['digest_entry_count']}"
         )
     return "\n".join(output)
 

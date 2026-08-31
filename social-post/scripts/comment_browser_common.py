@@ -113,13 +113,26 @@ def _require_post_url(
 def _require_comment_permalink_for_post(
     platform: str, observed: str, expected_post: str,
 ) -> str:
-    """Accept only comment anchors whose URL remains under the approved post."""
+    """Accept a stable platform comment anchor bound to the approved parent.
+
+    Threads models every reply as its own ``/@author/post/{id}`` permalink, so
+    its comment path cannot be nested under the root post path.  Parentage is
+    independently and strictly proven by ``observed_parent_post_permalink`` in
+    the scan contract; here we validate the Threads reply identity shape and
+    trusted host instead of applying the FB/IG nesting rule.
+    """
     comment = _require_platform_url(platform, observed, "comment_permalink")
     post = _require_platform_url(platform, expected_post, "post_permalink")
     comment_parts = urlsplit(comment)
     post_parts = urlsplit(post)
     if comment_parts.hostname != post_parts.hostname:
         raise ValueError("comment_permalink host differs from approved post")
+    if platform == "threads":
+        if not re.fullmatch(r"/@[^/]+/post/[^/]+", comment_parts.path):
+            raise ValueError("Threads comment_permalink is not a stable reply post")
+        if comment_parts.query:
+            raise ValueError("Threads comment_permalink cannot contain a query")
+        return comment
     post_path = post_parts.path.rstrip("/") or "/"
     if not (
         comment_parts.path == post_path

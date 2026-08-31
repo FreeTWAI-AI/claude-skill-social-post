@@ -50,16 +50,16 @@
 
 static JSON receipt、`PASS`、來源 hash、fixture receipt、self-authored boolean 或 projection 自身 hash 都不能升級 production。`comment_capability_trusted_host_verifier.py` 只提供 fail-closed 的既有 session challenge／response promotion 邊界：逐欄綁定 authority、session、run、source snapshot、有效時間與三平台結果，並要求 browser launch／mutation 為精確整數 `0`。JavaScript runtime authority 已 source-wire 到既有 Chrome session，但尚未完成已登入三平台 canary，也尚未將它的 process-local attestation 接入這個 promotion verifier；`THREE_PLATFORM_BROWSER_FIXTURE` 只有 test-only raw／envelope verifier，另外四個 live successor verifier 仍未接入。離線 test authority 只有明示 test mode 才能校準 schema，不能取代 genuine Chrome provenance、authenticated canary 或 child execution attestation。因此 production obligation 仍必須維持 open。
 
-closed-world direct dependency 如下，並強制 transitive closure：
+closed-world production-promotion dependency 如下，並強制 transitive closure；`promotion=false` 的 fixture 是獨立 test-only 品質證據，不是 live predecessor：
 
 1. `TRUSTED_CHROME_HOST_RESOLVER`：無 predecessor。
 2. `STABLE_NODE_FRAME_MAPPING`：依賴 `TRUSTED_CHROME_HOST_RESOLVER`。
-3. `THREE_PLATFORM_BROWSER_FIXTURE`：依賴 `TRUSTED_CHROME_HOST_RESOLVER` 與 `STABLE_NODE_FRAME_MAPPING`。
-4. `THREE_PLATFORM_LIVE_DRAFT`：依賴 `THREE_PLATFORM_BROWSER_FIXTURE`。
+3. `THREE_PLATFORM_BROWSER_FIXTURE`：`promotion=false`，沒有 production predecessor，永遠不得標成 `verified` 或解鎖 live successor。
+4. `THREE_PLATFORM_LIVE_DRAFT`：直接依賴 `TRUSTED_CHROME_HOST_RESOLVER` 與 `STABLE_NODE_FRAME_MAPPING`。
 5. `LIVE_BATCH_CONFIRM`：依賴 `THREE_PLATFORM_LIVE_DRAFT`。
 6. `LIVE_BOUNDED_AUTO`：依賴 `LIVE_BATCH_CONFIRM`。
 
-不得跳過 predecessor、加入未知節點、形成 cycle，或用空白／別名狀態繞過。每份 production evidence 必須逐欄綁定 obligation／gate／scope、product version、source revision、capability contract、policy、exact source inventory、run、有效時間與當前 session；依能力再綁定 platform、account、post、parent/comment、reply hash、grant、permit、claim、action 及 child execution receipt。
+不得跳過 predecessor、把 `promotion=false` row 當 predecessor、加入未知節點、形成 cycle，或用空白／別名狀態繞過。任何 `promotion=false` row 即使有 source-bound verifier 與 PASS envelope，也只能校準 test-only 品質證據；canonical gate 與 production receipt facade 都必須拒絕 `status=verified`。每份 production evidence 必須逐欄綁定 obligation／gate／scope、product version、source revision、capability contract、policy、exact source inventory、run、有效時間與當前 session；依能力再綁定 platform、account、post、parent/comment、reply hash、grant、permit、claim、action 及 child execution receipt。
 
 grant、permit、claim、action、execution receipt 與 `(platform, account, post, parent/comment)` 都必須 one-time；同一 parent 不得只更換 action ID 後重送，grant 有效期也不得超過 receipt 與當前 session 的共同有效窗。任何重複、未知或對帳不完整都進入 `needs_reconcile`／停止整批。fixture 永遠是 test-only evidence，不得升級 trusted host、live draft、live batch、bounded auto 或 `live_browser_actuation_enabled`。
 

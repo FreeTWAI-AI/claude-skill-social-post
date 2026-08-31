@@ -23,11 +23,28 @@ def now_iso() -> str:
 
 
 def configure_utf8_streams() -> None:
-    """Keep emoji-safe CLI output on Windows consoles that default to CP950."""
+    """Keep JSON pipes and emoji-safe output UTF-8 on Windows/CP950 hosts."""
+    stdin_reconfigure = getattr(sys.stdin, "reconfigure", None)
+    if callable(stdin_reconfigure):
+        stdin_reconfigure(encoding="utf-8", errors="strict")
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
             reconfigure(encoding="utf-8", errors="replace")
+
+
+def _normalize_json_unicode(value: Any) -> Any:
+    """Join escaped surrogate pairs and replace malformed lone surrogates."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if isinstance(value, list):
+        return [_normalize_json_unicode(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _normalize_json_unicode(key): _normalize_json_unicode(item)
+            for key, item in value.items()
+        }
+    return value
 
 
 def load_policy(root: Path = SKILL_ROOT) -> dict[str, Any]:
@@ -104,8 +121,10 @@ def commit_or_preview(
 
 def read_json_source(value: str) -> Any:
     if value == "-":
-        return json.load(sys.stdin)
-    return json.loads(Path(value).read_text(encoding="utf-8-sig"))
+        return _normalize_json_unicode(json.load(sys.stdin))
+    return _normalize_json_unicode(
+        json.loads(Path(value).read_text(encoding="utf-8-sig"))
+    )
 
 
 def intent_state(

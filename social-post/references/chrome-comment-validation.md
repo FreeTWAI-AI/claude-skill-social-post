@@ -29,18 +29,18 @@
 
 ### Exact promotion DAG
 
-promotion dependency graph 是 closed-world exact contract；target 只有在所有 direct predecessor verified、且其 transitive closure 也完整時才可評估。不得跳級、用空白／別名狀態繞過，亦不得出現未知節點、self-edge 或 cycle。
+production-promotion dependency graph 是 closed-world exact contract；target 只有在所有 direct predecessor verified、且其 transitive closure 也完整時才可評估。`promotion=false` row 只能作為獨立 test-only 品質證據，不得標成 `verified`、不得成為 live predecessor。不得跳級、用空白／別名狀態繞過，亦不得出現未知節點、self-edge 或 cycle。
 
 | obligation | direct predecessors |
 |---|---|
 | `TRUSTED_CHROME_HOST_RESOLVER` | 無 |
 | `STABLE_NODE_FRAME_MAPPING` | `TRUSTED_CHROME_HOST_RESOLVER` |
-| `THREE_PLATFORM_BROWSER_FIXTURE` | `TRUSTED_CHROME_HOST_RESOLVER`、`STABLE_NODE_FRAME_MAPPING` |
-| `THREE_PLATFORM_LIVE_DRAFT` | `THREE_PLATFORM_BROWSER_FIXTURE` |
+| `THREE_PLATFORM_BROWSER_FIXTURE` | 無；`promotion=false` test-only 品質證據 |
+| `THREE_PLATFORM_LIVE_DRAFT` | `TRUSTED_CHROME_HOST_RESOLVER`、`STABLE_NODE_FRAME_MAPPING` |
 | `LIVE_BATCH_CONFIRM` | `THREE_PLATFORM_LIVE_DRAFT` |
 | `LIVE_BOUNDED_AUTO` | `LIVE_BATCH_CONFIRM` |
 
-`THREE_PLATFORM_BROWSER_FIXTURE` 即使完成 Browser 實跑，也只可證明 source-bound localhost test path；它的 receipt 必須維持 `capability_promotion_eligible=false`、`live_browser_actuation_enabled=false` 與 test-only claim authority。fixture 不得替代 authenticated Meta canary、trusted verifier、stable live mapping、使用者授權或任何 live predecessor，也不得把 downstream live obligation 升級。
+`THREE_PLATFORM_BROWSER_FIXTURE` 即使完成 Browser 實跑，也只可證明 source-bound localhost test path；它的 receipt 必須維持 `capability_promotion_eligible=false`、`live_browser_actuation_enabled=false` 與 test-only claim authority。fixture 不得替代 authenticated Meta canary、trusted verifier、stable live mapping、使用者授權或任何 live predecessor，也不得把 downstream live obligation 升級。production facade、canonical ledger gate 與 DAG validator 分別拒絕 fixture promotion、`status=verified` 與 fixture predecessor edge。
 
 ## 平台矩陣
 

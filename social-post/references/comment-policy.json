@@ -2,6 +2,7 @@
   "schema_version": 1,
   "policy_version": 1,
   "default_mode": "batch_confirm",
+  "live_browser_scan_enabled": true,
   "live_browser_actuation_enabled": false,
   "auto_classifications": [
     "positive_reaction",

@@ -32,7 +32,7 @@ const HOST_INTERNAL = new WeakMap();
 
 const POST_PATH_RULES = Object.freeze({
   facebook: /(?:\/posts\/|\/videos\/|^\/reel\/|^\/watch\/|^\/(?:permalink|story)\.php$|^\/photo\/)/u,
-  instagram: /^\/(?:p|reel|tv)\/[^/]+$/u,
+  instagram: /^\/(?:[^/]+\/)?(?:p|reel|tv)\/[^/]+$/u,
   threads: /^\/@[^/]+\/post\/[^/]+$/u,
 });
 
@@ -217,4 +217,18 @@ export async function verifyTrustedChromeHostStillCurrent(attestation, rawTarget
     fail("trusted document, epoch, frame, or runtime binding changed after attestation");
   }
   return attestation;
+}
+
+export async function readTrustedChromeAccessibleSnapshot(attestation, rawTarget) {
+  await verifyTrustedChromeHostStillCurrent(attestation, rawTarget);
+  const internal = HOST_INTERNAL.get(attestation);
+  if (!internal || !isExistingChromeReadSession(internal.session)) {
+    fail("trusted host snapshot read lost its existing Chrome session binding");
+  }
+  if (typeof internal.session.readAccessibleSnapshot !== "function") {
+    fail("trusted Chrome read session has no accessible snapshot surface");
+  }
+  const snapshot = await internal.session.readAccessibleSnapshot(rawTarget);
+  await verifyTrustedChromeHostStillCurrent(attestation, rawTarget);
+  return snapshot;
 }

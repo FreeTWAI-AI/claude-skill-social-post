@@ -17,6 +17,7 @@ from comment_test_browser_adapter import run_browser_adapter_tests
 from comment_test_browser_contract import run_browser_contract_tests
 from comment_test_browser_recovery import run_browser_recovery_tests
 from comment_test_browser_receipt_provenance import run_browser_receipt_provenance_tests
+from comment_test_browser_send_urls import run_browser_send_url_tests
 from comment_test_cli import run_cli_tests
 from comment_test_fixture_promotion_envelope import (
     run_fixture_promotion_envelope_tests,
@@ -38,6 +39,8 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_claim_integration_test.mjs",
     "scripts/comment_chrome_fixture_contract_test.mjs",
     "scripts/comment_chrome_host_authority_test.mjs",
+    "scripts/comment_chrome_live_bridge_test.mjs",
+    "scripts/comment_chrome_live_surface_test.mjs",
     "scripts/comment_chrome_node_frame_lifecycle_test.mjs",
     "scripts/comment_chrome_node_frame_mapping_test.mjs",
     "scripts/comment_chrome_scan_adapters_test.mjs",
@@ -97,6 +100,8 @@ def run_chrome_actuator_tests() -> None:
         "comment_chrome_claim_bridge_test.mjs",
         "comment_chrome_claim_integration_test.mjs",
         "comment_chrome_host_authority_test.mjs",
+        "comment_chrome_live_bridge_test.mjs",
+        "comment_chrome_live_surface_test.mjs",
         "comment_chrome_scan_adapters_test.mjs",
         "comment_chrome_actuator_test.mjs",
     ):
@@ -176,6 +181,7 @@ def run_comment_self_tests() -> None:
     _run_step("cli", run_cli_tests)
     _run_step("browser-adapter", run_browser_adapter_tests)
     _run_step("browser-contract", run_browser_contract_tests)
+    _run_step("browser-send-urls", run_browser_send_url_tests)
     _run_step("browser-receipt-provenance", run_browser_receipt_provenance_tests)
     _run_step("browser-recovery", run_browser_recovery_tests)
     _run_step("js-architecture-config", run_js_architecture_config_test)
