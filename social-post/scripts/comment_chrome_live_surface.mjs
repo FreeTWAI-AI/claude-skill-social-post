@@ -14,7 +14,7 @@ export {
   prepareLiveReplyThread, inspectLiveCanaryResult,
 } from "./comment_chrome_instagram_surface.mjs";
 
-export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.5";
+export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.6";
 
 export async function readLiveTargetComment(tab, target) {
   if (target?.platform === "instagram") return readInstagramTargetComment(tab, target);

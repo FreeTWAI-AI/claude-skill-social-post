@@ -1370,6 +1370,57 @@ function createScanAndCommit(scanPost, {
   };
 }
 
+async function requireExactTargetIntakeTab(tab, expectedUrl, expectedTabId) {
+  if (!tab || tab.id !== expectedTabId || typeof tab.url !== "function") {
+    fail("native target intake tab identity changed");
+  }
+  const observed = await tab.url();
+  if (tab.id !== expectedTabId || new URL(observed).hash
+      || canonicalUrl(observed).toString() !== expectedUrl) {
+    fail("native target intake tab URL changed");
+  }
+}
+
+/** Listing locates a source-owned tab; it is never native observation evidence. */
+async function withSourceOwnedTargetIntakeTab(commentPermalink, inspect) {
+  const expectedUrl = canonicalUrl(commentPermalink).toString();
+  const browser = await getSourceOwnedChromeBrowser();
+  const listed = await browser.tabs.list();
+  if (!Array.isArray(listed)) fail("native target intake tab listing is malformed");
+  const matches = [];
+  for (const row of listed) {
+    if (!row || typeof row.url !== "string") fail("native target intake tab metadata is malformed");
+    let listedUrl;
+    try {
+      if (new URL(row.url).hash) continue;
+      listedUrl = canonicalUrl(row.url).toString();
+    } catch { continue; } // Unrelated non-target browser URLs provide no authority.
+    if (listedUrl !== expectedUrl) continue;
+    const id = requiredString(row.id, "native target intake listed tab id");
+    if (id !== row.id) fail("native target intake listed tab id is malformed");
+    matches.push(id);
+  }
+  if (matches.length > 1) fail("native target intake has multiple exact URL tabs");
+  const created = matches.length === 0;
+  const tab = created ? await browser.tabs.new() : await browser.tabs.get(matches[0]);
+  try {
+    const tabId = requiredString(tab?.id, "native target intake tab id");
+    if (tabId !== tab.id || (!created && tabId !== matches[0])) {
+      fail("native target intake resolved tab differs from the source listing");
+    }
+    bindLiveReplyBrowser(tab, browser);
+    if (created) await tab.goto(expectedUrl);
+    await requireExactTargetIntakeTab(tab, expectedUrl, tabId);
+    const result = await inspect(tab);
+    await requireExactTargetIntakeTab(tab, expectedUrl, tabId);
+    return result;
+  } finally {
+    if (created) {
+      try { await Promise.race([tab.close(), new Promise((resolve) => setTimeout(resolve, 2000))]); } catch { /* no repeat */ }
+    }
+  }
+}
+
 async function observeLiveTargetComment(rawTarget) {
   const raw = immutableJsonSnapshot(rawTarget, "native target observation request");
   const allowed = new Set(["platform", "account_key", "post_key", "post_permalink", "session_id",
@@ -1396,11 +1447,7 @@ async function observeLiveTargetComment(rawTarget) {
     platform: request.platform, account_key: request.account_key, post_key: request.post_key,
     post_permalink: request.post_permalink, ...request.target,
   };
-  const browser = await getSourceOwnedChromeBrowser();
-  const tab = await browser.tabs.new();
-  try {
-    bindLiveReplyBrowser(tab, browser);
-    await tab.goto(request.target.comment_permalink);
+  const { first, second } = await withSourceOwnedTargetIntakeTab(request.target.comment_permalink, async (tab) => {
     if (request.platform === "instagram") {
       await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
       await waitForNativeParent(tab, request.target.comment_permalink);
@@ -1422,40 +1469,39 @@ async function observeLiveTargetComment(rawTarget) {
         || digestObject(first.comment) !== digestObject(second.comment)) {
       fail("native target changed across its two scoped observations");
     }
-    const normalizeComment = (comment) => ({ ...comment,
-      comment_permalink: request.target.comment_permalink,
-      observed_parent_post_permalink: canonicalUrl(comment.observed_parent_post_permalink).toString(),
-      language: comment.language ?? "und",
-    });
-    const comment = normalizeComment(second.comment);
-    const firstDigest = digestObject(normalizeComment(first.comment));
-    const secondDigest = digestObject(comment);
-    const receipt = immutableJsonSnapshot({
-      schema_version: 1, test_only: false, observation_scope: "target_comment",
-      scan_request_id: request.scan_request_id, session_id: request.session_id,
-      platform: request.platform, account_key: request.account_key, post_key: request.post_key,
-      post_permalink: request.post_permalink, observed_url: second.observedUrl, observed_at: nowIso(),
-      authentication_state: "authenticated", account_verified: true, post_verified: true, target_verified: true,
-      comment, observation_evidence: {
-        schema_version: 1, adapter_id: `source-owned-${request.platform}-native-target`,
-        adapter_version: LIVE_REPLY_ADAPTER_VERSION, document_binding: second.documentBinding,
-        stable_read_count: 2, first_read_digest: firstDigest, second_read_digest: secondDigest,
-      },
-    }, "source-owned native target observation");
-    const committed = await runPythonScanCommit({ request,
-      envelope: { provenance: authorized.capability, receipt },
-    });
-    if (committed.operation !== "browser-target-observation"
-        || committed.scan_request_id !== request.scan_request_id
-        || committed.receipt_digest !== digestObject(receipt)
-        || committed.observation_scope !== "target_comment" || committed.comment_count !== 1
-        || committed.whole_post_complete !== false || committed.reply_thread_complete !== false) {
-      fail("native observation commit differs from the exact source receipt");
-    }
-    return immutableJsonSnapshot(committed, "target-only intake result");
-  } finally {
-    try { await Promise.race([tab.close(), new Promise((resolve) => setTimeout(resolve, 2000))]); } catch { /* no repeat */ }
+    return { first, second };
+  });
+  const normalizeComment = (comment) => ({ ...comment,
+    comment_permalink: request.target.comment_permalink,
+    observed_parent_post_permalink: canonicalUrl(comment.observed_parent_post_permalink).toString(),
+    language: comment.language ?? "und",
+  });
+  const comment = normalizeComment(second.comment);
+  const firstDigest = digestObject(normalizeComment(first.comment));
+  const secondDigest = digestObject(comment);
+  const receipt = immutableJsonSnapshot({
+    schema_version: 1, test_only: false, observation_scope: "target_comment",
+    scan_request_id: request.scan_request_id, session_id: request.session_id,
+    platform: request.platform, account_key: request.account_key, post_key: request.post_key,
+    post_permalink: request.post_permalink, observed_url: second.observedUrl, observed_at: nowIso(),
+    authentication_state: "authenticated", account_verified: true, post_verified: true, target_verified: true,
+    comment, observation_evidence: {
+      schema_version: 1, adapter_id: `source-owned-${request.platform}-native-target`,
+      adapter_version: LIVE_REPLY_ADAPTER_VERSION, document_binding: second.documentBinding,
+      stable_read_count: 2, first_read_digest: firstDigest, second_read_digest: secondDigest,
+    },
+  }, "source-owned native target observation");
+  const committed = await runPythonScanCommit({ request,
+    envelope: { provenance: authorized.capability, receipt },
+  });
+  if (committed.operation !== "browser-target-observation"
+      || committed.scan_request_id !== request.scan_request_id
+      || committed.receipt_digest !== digestObject(receipt)
+      || committed.observation_scope !== "target_comment" || committed.comment_count !== 1
+      || committed.whole_post_complete !== false || committed.reply_thread_complete !== false) {
+    fail("native observation commit differs from the exact source receipt");
   }
+  return immutableJsonSnapshot(committed, "target-only intake result");
 }
 
 export function createCommentChromeActuator(options = {}) {

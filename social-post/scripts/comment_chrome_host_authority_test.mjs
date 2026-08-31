@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { instagramUrlIdentity, sameInstagramPostUrl } from "./comment_chrome_common.mjs";
+import { inspectStableHost } from "./comment_chrome_runtime_document.mjs";
 
 import {
   TRUSTED_CHROME_HOST_RESOLVER_VERSION,
@@ -20,6 +21,7 @@ import {
   isExistingChromeReadSession,
   loadSetupBrowserRuntime,
   openExistingChromeReadSession,
+  recoverSourceOwnedChromeBrowser,
   verifyPinnedBrowserClientBytes,
 } from "./comment_chrome_runtime_authority.mjs";
 
@@ -40,7 +42,7 @@ const TARGETS = {
 
 assert.equal(TRUSTED_CHROME_HOST_SCHEMA_VERSION, 2);
 assert.equal(TRUSTED_CHROME_HOST_RESOLVER_VERSION, "2026-08-30.1");
-assert.equal(CHROME_RUNTIME_AUTHORITY_VERSION, "2026-08-31.1");
+assert.equal(CHROME_RUNTIME_AUTHORITY_VERSION, "2026-08-31.2");
 assert.equal(CHROME_BROWSER_CLIENT_REVISION, "openai-bundled/chrome/26.825.51511");
 assert.equal(
   CHROME_BROWSER_CLIENT_SHA256,
@@ -67,6 +69,9 @@ assert.equal(runtimeDescriptor.bounded_process_owned_tab, true);
 assert.equal(runtimeDescriptor.trusted_node_repl_required, true);
 assert.equal(runtimeDescriptor.raw_tab_exposed, false);
 assert.equal(runtimeDescriptor.can_launch_browser, false);
+assert.equal(runtimeDescriptor.explicit_source_owned_recovery, true);
+assert.equal(runtimeDescriptor.chrome_reselection_limit, 1);
+assert.equal(runtimeDescriptor.recovery_trigger, "exact cached-browser disconnected error only");
 assert.equal(runtimeDescriptor.can_navigate, true);
 assert.equal(
   runtimeDescriptor.navigation_scope,
@@ -102,6 +107,9 @@ assert.equal(openExistingChromeReadSession.length, 1);
 assert.equal(captureChromeAccessibleSnapshotPair.length, 1);
 assert.equal(typeof loadSetupBrowserRuntime, "function");
 assert.equal(loadSetupBrowserRuntime.length, 0);
+assert.equal(recoverSourceOwnedChromeBrowser.length, 0);
+await assert.rejects(() => recoverSourceOwnedChromeBrowser({ browser: {} }), /accepts no caller authority/u);
+await assert.rejects(() => recoverSourceOwnedChromeBrowser(), /requires an existing cached selection/u);
 assert.equal(isTrustedChromeHostAttestation({}), false);
 assert.equal(isExistingChromeReadSession({}), false);
 
@@ -188,6 +196,57 @@ const runtimeSource = await readFile(
 const hostSource = await readFile(
   new URL("./comment_chrome_host_authority.mjs", import.meta.url), "utf8",
 );
+const documentSource = await readFile(
+  new URL("./comment_chrome_runtime_document.mjs", import.meta.url), "utf8",
+);
+
+// Ordinary document-unit values exercise the real callback, not browser authority.
+function documentFixture() {
+  const href = TARGETS.facebook.post_permalink;
+  const view = { location: { href, origin: new URL(href).origin }, performance: { timeOrigin: 1000 }, frameElement: null };
+  view.top = view;
+  const document = { defaultView: view };
+  const element = { ownerDocument: document, isConnected: true, tagName: "HTML" };
+  document.documentElement = element;
+  const current = { view, element, rootCount: 1, snapshot: "document", urls: [href, href],
+    calls: { urls: 0, snapshots: 0, evaluate: 0 } };
+  current.tab = {
+    url: async () => current.urls[current.calls.urls++],
+    playwright: {
+      domSnapshot: async () => { current.calls.snapshots += 1; return current.snapshot; },
+      locator: (selector, options) => {
+        assert.equal(selector, "html"); assert.deepEqual(options, {});
+        return {
+          count: async () => current.rootCount,
+          isVisible: async () => true,
+          evaluate: async (callback) => { current.calls.evaluate += 1; return callback(element); },
+        };
+      },
+    },
+  };
+  return current;
+}
+
+const stableDocument = documentFixture();
+const stableObservation = await inspectStableHost(stableDocument.tab, TARGETS.facebook.post_permalink);
+assert.equal(stableObservation.observed_url, TARGETS.facebook.post_permalink);
+assert.deepEqual(stableObservation.frame_topology, { policy: "main-frame-only", iframe_count: 0 });
+assert.equal(stableObservation.document_state.document_epoch, 1000);
+assert.deepEqual(stableDocument.calls, { urls: 2, snapshots: 2, evaluate: 1 });
+assert.equal(Object.isFrozen(stableObservation), true);
+assert.equal(isExistingChromeReadSession(stableObservation), false, "pure document diagnostics never mint a session brand");
+assert.equal(isTrustedChromeHostAttestation(stableObservation), false, "pure document diagnostics never mint host authority");
+for (const [mutate, pattern] of [
+  [(f) => { f.urls[1] = "https://www.facebook.com/example/posts/OTHER"; }, /URL changed/u],
+  [(f) => { f.snapshot = "iframe [anonymous]"; }, /main-frame-only/u],
+  [(f) => { delete f.view.performance; }, /no readonly performance time origin/u],
+  [(f) => { f.view.location.origin = "https://another.example"; }, /document origin differs/u],
+  [(f) => { f.element.isConnected = false; }, /connected top-level HTML/u],
+  [(f) => { f.rootCount = 2; }, /expected exactly one match/u],
+]) {
+  const current = documentFixture(); mutate(current);
+  await assert.rejects(inspectStableHost(current.tab, TARGETS.facebook.post_permalink), pattern);
+}
 
 const browserClientSpecifier = [
   "..", "..", "..", "plugins", "cache", "openai-bundled", "chrome",
@@ -202,7 +261,13 @@ assert.match(runtimeSource, /verifyPinnedBrowserClientBytes\(browserClientBytes\
 assert.match(runtimeSource, /await setupBrowserRuntime\(\)/u);
 assert.match(runtimeSource, /browser\.user\.openTabs\(\)/u);
 assert.match(runtimeSource, /browser\.user\.claimTab\(listedTab\)/u);
-assert.match(runtimeSource, /view\?\.performance\?\.timeOrigin/u);
+assert.match(documentSource, /view\?\.performance\?\.timeOrigin/u);
+assert.deepEqual([...documentSource.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/gu)].map((match) => match[1]).sort(),
+  ["canonicalString", "inspectStableHost", "sameApprovedPostUrl", "sameUrl"]);
+assert.deepEqual([...documentSource.matchAll(/\bfrom\s+"([^"]+)"/gu)].map((match) => match[1]), ["./comment_chrome_common.mjs"]);
+assert.doesNotMatch(documentSource, /\bnew\s+(?:WeakMap|WeakSet|Map|Set)\s*\(|\b(?:EXISTING_CHROME_READ_SESSIONS|READ_SESSION_INTERNAL|sourceOwnedChrome\w*|getSourceOwnedChromeBrowser|recoverSourceOwnedChromeBrowser)\b/u,
+  "document helpers cannot own browser caches, reconnection or session brands");
+assert.doesNotMatch(documentSource, /\.browsers\s*\.|\.user\s*\.|\bimport\s*\(/u);
 assert.match(runtimeSource, /openExistingChromeReadSession\(rawTarget\)/u);
 assert.match(hostSource, /resolveTrustedChromeHost\(rawTarget\)/u);
 assert.match(
@@ -223,7 +288,7 @@ const otherRuntimeSource = runtimeSource.slice(0, captureStart) + runtimeSource.
 assert.match(captureSource, /const expectedUrl = approvedPermalink\(rawTarget\);/u);
 assert.match(captureSource, /const browser = await getSourceOwnedChromeBrowser\(\);/u);
 assert.equal((runtimeSource.match(/agent\.browsers\.get\("chrome"\)/gu) ?? []).length, 1,
-  "a persistent source runtime selects Chrome once, never once per tab");
+  "initial selection and explicit recovery use one source-owned Chrome-family call site");
 assert.match(captureSource, /const tab = await browser\.tabs\.new\(\);\s*try\s*\{\s*await tab\.goto\(expectedUrl\);/u);
 assert.deepEqual(
   runtimeSource.match(/\.(?:goto|reload|back|forward)\s*\([^)]*\)/gu),
@@ -236,7 +301,7 @@ assert.match(captureSource, /exact_navigation_count: 1/u);
 assert.match(captureSource, /page_mutation_count: 0/u);
 assert.match(captureSource, /tab_cleanup_required: true/u);
 assert.match(captureSource, /finally\s*\{[\s\S]*tab\.close\(\)/u);
-for (const source of [otherRuntimeSource, hostSource]) {
+for (const source of [otherRuntimeSource, hostSource, documentSource]) {
   assert.doesNotMatch(source, /\.(?:goto|reload|back|forward)\s*\(/u);
   assert.doesNotMatch(source, /\.tabs\.new\s*\(/u);
 }
@@ -260,6 +325,7 @@ for (const [label, pattern] of [
 ]) {
   assert.doesNotMatch(runtimeSource, pattern, label);
   assert.doesNotMatch(hostSource, pattern, label);
+  assert.doesNotMatch(documentSource, pattern, label);
 }
 
 for (const forbiddenExport of [
@@ -268,6 +334,7 @@ for (const forbiddenExport of [
 ]) {
   assert.doesNotMatch(runtimeSource, new RegExp(`export\\s+.*${forbiddenExport}`, "u"));
   assert.doesNotMatch(hostSource, new RegExp(`export\\s+.*${forbiddenExport}`, "u"));
+  assert.doesNotMatch(documentSource, new RegExp(`export\\s+.*${forbiddenExport}`, "u"));
 }
 
 console.log("comment Chrome source-wired read-only host authority tests passed");

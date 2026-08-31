@@ -36,6 +36,7 @@ const SOURCE_PATHS = Object.freeze([
   "scripts/comment_chrome_scan_fixture_testonly.mjs",
   "scripts/comment_chrome_send.mjs",
   "scripts/comment_chrome_send_support.mjs",
+  "scripts/comment_chrome_node_identity.mjs",
   "scripts/comment_js_architecture_contract.mjs",
   "scripts/comment_js_architecture_core.mjs",
   "scripts/comment_js_architecture_gate.mjs",

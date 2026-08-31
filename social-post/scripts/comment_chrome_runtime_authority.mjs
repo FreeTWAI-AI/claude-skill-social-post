@@ -9,6 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { types } from "node:util";
 
 import {
   LIVE_HOSTS,
@@ -18,11 +19,12 @@ import {
   immutableJsonSnapshot,
   instagramUrlIdentity,
   requiredString,
-  sameInstagramPostUrl,
-  unique,
 } from "./comment_chrome_common.mjs";
+import {
+  canonicalString, sameUrl, sameApprovedPostUrl, inspectStableHost,
+} from "./comment_chrome_runtime_document.mjs";
 
-export const CHROME_RUNTIME_AUTHORITY_VERSION = "2026-08-31.1";
+export const CHROME_RUNTIME_AUTHORITY_VERSION = "2026-08-31.2";
 export const CHROME_BROWSER_CLIENT_REVISION = "openai-bundled/chrome/26.825.51511";
 export const CHROME_BROWSER_CLIENT_SHA256 =
   "c52ba09202f0e82caa6f6d2a6463a8635c1b1316567975d9b91c1a05fb5af501";
@@ -30,7 +32,10 @@ export const CHROME_BROWSER_CLIENT_BYTES = 149210;
 
 const EXISTING_CHROME_READ_SESSIONS = new WeakSet();
 const READ_SESSION_INTERNAL = new WeakMap();
+let sourceOwnedChromeAgentPromise;
 let sourceOwnedChromePromise;
+let sourceOwnedChromeReconnectInFlight;
+let sourceOwnedChromeReselectionAttempted = false;
 const META_POST_PATH_RULES = Object.freeze({
   facebook: /(?:\/posts\/|\/videos\/|^\/reel\/|^\/watch\/|^\/(?:permalink|story)\.php$|^\/photo\/)/u,
   instagram: /^\/(?:[A-Za-z0-9._]+\/)?(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+$/u,
@@ -84,35 +89,103 @@ export async function loadSetupBrowserRuntime() {
   }
 }
 
-/** One selection per persistent runtime; tab cleanup does not reconnect Chrome. */
+function requireBoundedChromeSurface(browser) {
+  if (!browser?.tabs || typeof browser.tabs.new !== "function") {
+    fail("trusted Chrome session cannot create a bounded tab");
+  }
+  return browser;
+}
+
+async function getSourceOwnedChromeAgent() {
+  if (!sourceOwnedChromeAgentPromise) {
+    sourceOwnedChromeAgentPromise = (async () => {
+      const setupBrowserRuntime = await loadSetupBrowserRuntime();
+      return requireBrowserSurface(await setupBrowserRuntime());
+    })();
+  }
+  return sourceOwnedChromeAgentPromise;
+}
+
+async function selectSourceOwnedChromeBrowser() {
+  const agent = await getSourceOwnedChromeAgent();
+  return requireBoundedChromeSurface(await agent.browsers.get("chrome"));
+}
+
+/** Cached source selection; only explicit qualified recovery can replace it. */
 export async function getSourceOwnedChromeBrowser() {
   if (!sourceOwnedChromePromise) {
-    sourceOwnedChromePromise = (async () => {
-      const setupBrowserRuntime = await loadSetupBrowserRuntime();
-      const agent = requireBrowserSurface(await setupBrowserRuntime());
-      const browser = await agent.browsers.get("chrome");
-      if (!browser?.tabs || typeof browser.tabs.new !== "function") {
-        fail("trusted Chrome session cannot create a bounded tab");
-      }
-      return browser;
-    })();
+    sourceOwnedChromePromise = selectSourceOwnedChromeBrowser();
   }
   // A rejected selection stays rejected: callers cannot silently reset a
   // browser connection to evade an uncertain send or lose its reservations.
   return sourceOwnedChromePromise;
 }
 
-function canonicalString(raw) {
-  return canonicalUrl(raw).toString();
+function exactSourceBrowserDisconnection(error, browser) {
+  const browserId = browser?.browserId;
+  return types.isNativeError(error) && error.name === "Error"
+    && typeof browserId === "string" && /^[A-Za-z0-9_-]{1,200}$/u.test(browserId)
+    && error.message === `Browser is not available: ${browserId}`;
 }
 
-function sameUrl(left, right) {
-  return canonicalString(left) === canonicalString(right);
+async function probeSourceOwnedChromeBrowser(browser) {
+  if (!browser?.tabs || typeof browser.tabs.list !== "function") {
+    fail("trusted Chrome session cannot list its bounded tabs");
+  }
+  const tabs = await browser.tabs.list();
+  if (!Array.isArray(tabs)) fail("trusted Chrome tabs listing must be an array");
+  return browser;
 }
 
-function sameApprovedPostUrl(observed, expected) {
-  return LIVE_HOSTS.instagram.has(canonicalUrl(expected).hostname)
-    ? sameInstagramPostUrl(observed, expected) : sameUrl(observed, expected);
+async function recoverSourceOwnedChromeBrowserOnce() {
+  if (!sourceOwnedChromePromise) {
+    fail("source-owned Chrome recovery requires an existing cached selection");
+  }
+  const cachedPromise = sourceOwnedChromePromise;
+  const cachedBrowser = await cachedPromise;
+  try {
+    return await probeSourceOwnedChromeBrowser(cachedBrowser);
+  } catch (error) {
+    if (!exactSourceBrowserDisconnection(error, cachedBrowser)) throw error;
+    if (sourceOwnedChromeReselectionAttempted) {
+      fail("source-owned Chrome reselection was already attempted");
+    }
+    if (sourceOwnedChromePromise !== cachedPromise) {
+      fail("source-owned Chrome binding changed during recovery");
+    }
+    sourceOwnedChromeReselectionAttempted = true;
+    // Cache the complete replacement selection and health probe. A rejected
+    // replacement stays rejected, just like an initial selection, and never
+    // falls back to the known-disconnected handle.
+    sourceOwnedChromePromise = (async () => {
+      const replacement = await selectSourceOwnedChromeBrowser();
+      return probeSourceOwnedChromeBrowser(replacement);
+    })();
+    return sourceOwnedChromePromise;
+  }
+}
+
+/**
+ * Re-select Chrome once, only after the cached browser proves disconnected.
+ *
+ * This accepts no error, browser, agent, transport or action from the caller.
+ * It does not reload this module, clear reservations, retry a tab operation or
+ * perform any navigation, claim, page mutation or send.
+ */
+export async function recoverSourceOwnedChromeBrowser() {
+  if (arguments.length !== 0) fail("source-owned Chrome recovery accepts no caller authority");
+  if (!sourceOwnedChromeReconnectInFlight) {
+    const attempt = recoverSourceOwnedChromeBrowserOnce();
+    sourceOwnedChromeReconnectInFlight = attempt;
+    try {
+      return await attempt;
+    } finally {
+      if (sourceOwnedChromeReconnectInFlight === attempt) {
+        sourceOwnedChromeReconnectInFlight = undefined;
+      }
+    }
+  }
+  return sourceOwnedChromeReconnectInFlight;
 }
 
 function approvedPermalink(rawTarget) {
@@ -258,100 +331,6 @@ function exactFreshListingEntry(rawListing, expectedUrl) {
   return listedTab;
 }
 
-async function requireMainFrameTopology(tab) {
-  if (!tab?.playwright || typeof tab.playwright.domSnapshot !== "function") {
-    fail("existing Chrome read authority requires frame-aware DOM snapshots");
-  }
-  const raw = await tab.playwright.domSnapshot();
-  if (typeof raw !== "string" || !raw.trim()) {
-    fail("frame-aware DOM snapshot is missing or empty");
-  }
-  // DOM-CUA does not expose stable native frame ownership. Keep the current
-  // main-frame-only policy until authenticated Meta canaries prove a versioned
-  // frame mapping. This check reads the snapshot and never mutates the page.
-  const iframeMarkers = raw.match(/(?:<iframe\b|\biframe\s*\[)/giu) ?? [];
-  if (iframeMarkers.length !== 0) {
-    fail("trusted host is main-frame-only; iframe presence blocks live actuation");
-  }
-  return immutableJsonSnapshot({
-    policy: "main-frame-only",
-    iframe_count: 0,
-  }, "existing Chrome frame topology");
-}
-
-async function inspectDocumentRoot(tab) {
-  if (!tab?.playwright || typeof tab.playwright.locator !== "function") {
-    fail("existing Chrome read authority requires a Playwright root locator");
-  }
-  const root = await unique(tab.playwright.locator("html", {}), "top-level document root");
-  const value = await root.evaluate((element) => {
-    const document = element?.ownerDocument;
-    const view = document?.defaultView;
-    let topLevel = false;
-    let locationHref = "";
-    let origin = "";
-    let documentEpoch = null;
-    try {
-      topLevel = Boolean(view && view.top === view && view.frameElement === null);
-      locationHref = String(view?.location?.href ?? "");
-      origin = String(view?.location?.origin ?? "");
-      const observedTimeOrigin = Number(view?.performance?.timeOrigin);
-      documentEpoch = Number.isFinite(observedTimeOrigin) && observedTimeOrigin > 0
-        ? observedTimeOrigin : null;
-    } catch {
-      topLevel = false;
-    }
-    return {
-      connected: element?.isConnected === true,
-      is_root: Boolean(document && document.documentElement === element),
-      top_level: topLevel,
-      tag: String(element?.tagName ?? "").toLowerCase(),
-      location_href: locationHref,
-      origin,
-      document_epoch: documentEpoch,
-    };
-  });
-  const state = immutableJsonSnapshot(value, "existing Chrome document root state");
-  if (state.connected !== true || state.is_root !== true || state.top_level !== true
-      || state.tag !== "html") {
-    fail("trusted host requires one connected top-level HTML document root");
-  }
-  if (typeof state.document_epoch !== "number" || !Number.isFinite(state.document_epoch)
-      || state.document_epoch <= 0) {
-    fail("trusted document has no readonly performance time origin");
-  }
-  return state;
-}
-
-async function inspectStableHost(tab, expectedUrl) {
-  if (!tab || typeof tab.url !== "function") {
-    fail("existing Chrome read authority requires a browser tab URL surface");
-  }
-  const before = canonicalString(await tab.url());
-  if (!sameApprovedPostUrl(before, expectedUrl)) {
-    fail("current URL differs from the approved post permalink");
-  }
-  const firstTopology = await requireMainFrameTopology(tab);
-  const root = await inspectDocumentRoot(tab);
-  const secondTopology = await requireMainFrameTopology(tab);
-  const after = canonicalString(await tab.url());
-  if (!sameUrl(before, after) || !sameUrl(after, root.location_href)
-      || !sameApprovedPostUrl(after, expectedUrl)) {
-    fail("trusted host URL changed during document verification");
-  }
-  if (JSON.stringify(firstTopology) !== JSON.stringify(secondTopology)) {
-    fail("frame topology changed during trusted host verification");
-  }
-  if (root.origin !== new URL(expectedUrl).origin) {
-    fail("document origin differs from the approved post");
-  }
-  return immutableJsonSnapshot({
-    observed_url: after,
-    frame_topology: firstTopology,
-    document_state: root,
-  }, "existing Chrome stable host observation");
-}
-
 function createNarrowReadSession(tab, expectedUrl) {
   const session = Object.freeze({
     describeExistingSession() {
@@ -430,6 +409,9 @@ export function chromeRuntimeAuthorityDescriptor() {
     existing_session_only: true,
     raw_tab_exposed: false,
     can_launch_browser: false,
+    explicit_source_owned_recovery: true,
+    recovery_trigger: "exact cached-browser disconnected error only",
+    chrome_reselection_limit: 1,
     can_navigate: true,
     navigation_scope: "one exact trusted post permalink per read operation",
     can_mutate_page: false,

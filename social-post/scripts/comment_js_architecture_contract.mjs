@@ -23,6 +23,7 @@ export const EXPECTED_MODULE_ROLES = Object.freeze({
   "scripts/comment_chrome_actuator_test.mjs": "test",
   "scripts/comment_chrome_actuator.mjs": "production",
   "scripts/comment_chrome_claim_bridge_test.mjs": "test",
+  "scripts/comment_chrome_target_tab_reuse_test.mjs": "test",
   "scripts/comment_chrome_claim_bridge.mjs": "production",
   "scripts/comment_chrome_claim_integration_test.mjs": "test",
   "scripts/comment_chrome_common.mjs": "production",
@@ -52,15 +53,19 @@ export const EXPECTED_MODULE_ROLES = Object.freeze({
   "scripts/comment_chrome_node_frame_mapping_testonly.mjs": "fixture-testonly",
   "scripts/comment_chrome_reply_exhaustion.mjs": "production",
   "scripts/comment_chrome_runtime_authority.mjs": "production",
+  "scripts/comment_chrome_runtime_document.mjs": "production",
+  "scripts/comment_chrome_runtime_reconnect_test.mjs": "test",
   "scripts/comment_chrome_scan_adapters_test.mjs": "test",
   "scripts/comment_chrome_scan_adapters.mjs": "production",
   "scripts/comment_chrome_scan_fixture_testonly.mjs": "fixture-testonly",
   "scripts/comment_chrome_scan.mjs": "production",
   "scripts/comment_chrome_send_support.mjs": "production",
+  "scripts/comment_chrome_node_identity.mjs": "production",
   "scripts/comment_chrome_send.mjs": "production",
   "scripts/comment_chrome_threads_surface.mjs": "production",
   "scripts/comment_chrome_threads_reader.mjs": "production",
   "scripts/comment_chrome_threads_reader_test.mjs": "test",
+  "scripts/comment_chrome_threads_icon_identity_test.mjs": "test",
   "scripts/comment_chrome_textarea_identity_test.mjs": "test",
   "scripts/comment_fixture_browser_e2e.mjs": "e2e",
   "scripts/comment_js_architecture_contract.mjs": "tools",
@@ -77,6 +82,7 @@ export const EXPECTED_INVENTORY = Object.freeze(
 );
 
 export const REQUIRED_EDGES = Object.freeze([
+  ["scripts/comment_chrome_target_tab_reuse_test.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_actuator_send_test.mjs", "scripts/comment_chrome_textarea_identity_test.mjs"],
   ["scripts/comment_chrome_textarea_identity_test.mjs", "scripts/comment_chrome_send_support.mjs"],
   ["scripts/comment_chrome_textarea_identity_test.mjs", "scripts/comment_chrome_actuator_fixture_test.mjs"],
@@ -87,6 +93,8 @@ export const REQUIRED_EDGES = Object.freeze([
   ["scripts/comment_chrome_facebook_reader.mjs", "scripts/comment_chrome_facebook_surface.mjs"],
   ["scripts/comment_chrome_live_surface.mjs", "scripts/comment_chrome_facebook_reader.mjs"],
   ["scripts/comment_chrome_threads_reader_test.mjs", "scripts/comment_chrome_threads_reader.mjs"],
+  ["scripts/comment_chrome_threads_icon_identity_test.mjs", "scripts/comment_chrome_send_support.mjs"],
+  ["scripts/comment_chrome_threads_icon_identity_test.mjs", "scripts/comment_chrome_node_identity.mjs"],
   ["scripts/comment_chrome_threads_reader.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_threads_reader.mjs", "scripts/comment_chrome_live_common.mjs"],
   ["scripts/comment_chrome_live_surface.mjs", "scripts/comment_chrome_threads_reader.mjs"],
@@ -139,10 +147,13 @@ export const REQUIRED_EDGES = Object.freeze([
   ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_send.mjs", "scripts/comment_chrome_send_support.mjs"],
   ["scripts/comment_chrome_send_support.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_send_support.mjs", "scripts/comment_chrome_node_identity.mjs"],
+  ["scripts/comment_chrome_node_identity.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_send_support.mjs", "scripts/comment_chrome_reply_exhaustion.mjs"],
   ["scripts/comment_chrome_reply_exhaustion.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_host_authority_test.mjs", "scripts/comment_chrome_host_authority.mjs"],
   ["scripts/comment_chrome_host_authority_test.mjs", "scripts/comment_chrome_runtime_authority.mjs"],
+  ["scripts/comment_chrome_host_authority_test.mjs", "scripts/comment_chrome_runtime_document.mjs"],
   ["scripts/comment_chrome_host_authority.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_host_authority.mjs", "scripts/comment_chrome_runtime_authority.mjs"],
   ["scripts/comment_chrome_node_frame_lifecycle_snapshot_testonly.mjs", "scripts/comment_chrome_common.mjs"],
@@ -160,6 +171,8 @@ export const REQUIRED_EDGES = Object.freeze([
   ["scripts/comment_chrome_node_frame_mapping_testonly.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_node_frame_mapping_testonly.mjs", "scripts/comment_chrome_node_frame_mapping.mjs"],
   ["scripts/comment_chrome_runtime_authority.mjs", "scripts/comment_chrome_common.mjs"],
+  ["scripts/comment_chrome_runtime_authority.mjs", "scripts/comment_chrome_runtime_document.mjs"],
+  ["scripts/comment_chrome_runtime_document.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_scan.mjs", "scripts/comment_chrome_common.mjs"],
   ["scripts/comment_chrome_scan.mjs", "scripts/comment_chrome_scan_adapters.mjs"],
   ["scripts/comment_chrome_scan_adapters.mjs", "scripts/comment_chrome_common.mjs"],
@@ -222,12 +235,14 @@ export const FIXTURE_EVIDENCE_MODULE_CLOSURE = Object.freeze([
   "scripts/comment_chrome_node_frame_mapping_testonly.mjs",
   "scripts/comment_chrome_reply_exhaustion.mjs",
   "scripts/comment_chrome_runtime_authority.mjs",
+  "scripts/comment_chrome_runtime_document.mjs",
   "scripts/comment_chrome_scan.mjs",
   "scripts/comment_chrome_scan_adapters.mjs",
   "scripts/comment_meta_snapshot_parser.mjs",
   "scripts/comment_chrome_scan_fixture_testonly.mjs",
   "scripts/comment_chrome_send.mjs",
   "scripts/comment_chrome_send_support.mjs",
+  "scripts/comment_chrome_node_identity.mjs",
 ].sort());
 
 export const FIXTURE_EVIDENCE_FORBIDDEN_NODE_IMPORTS = Object.freeze([
@@ -254,15 +269,19 @@ export const FIXTURE_ALLOWED_NODE_IMPORTS = Object.freeze({
   "scripts/comment_chrome_node_frame_mapping.mjs": Object.freeze([]),
   "scripts/comment_chrome_node_frame_mapping_testonly.mjs": Object.freeze([]),
   "scripts/comment_chrome_reply_exhaustion.mjs": Object.freeze(["node:crypto"]),
+  // Source-reviewed use is types.isNativeError; this contract checks only the
+  // exact module specifier, not a member-level node:util capability schema.
   "scripts/comment_chrome_runtime_authority.mjs": Object.freeze([
-    "node:crypto", "node:fs/promises",
+    "node:crypto", "node:fs/promises", "node:util",
   ]),
+  "scripts/comment_chrome_runtime_document.mjs": Object.freeze([]),
   "scripts/comment_chrome_scan.mjs": Object.freeze([]),
   "scripts/comment_chrome_scan_adapters.mjs": Object.freeze([]),
   "scripts/comment_meta_snapshot_parser.mjs": Object.freeze([]),
   "scripts/comment_chrome_scan_fixture_testonly.mjs": Object.freeze([]),
   "scripts/comment_chrome_send.mjs": Object.freeze([]),
   "scripts/comment_chrome_send_support.mjs": Object.freeze([]),
+  "scripts/comment_chrome_node_identity.mjs": Object.freeze([]),
 });
 
 export const FIXTURE_ALLOWED_PROCESS_MEMBERS = Object.freeze({

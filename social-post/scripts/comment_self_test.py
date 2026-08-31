@@ -38,6 +38,7 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_actuator_send_test.mjs",
     "scripts/comment_chrome_actuator_test.mjs",
     "scripts/comment_chrome_claim_bridge_test.mjs",
+    "scripts/comment_chrome_target_tab_reuse_test.mjs",
     "scripts/comment_chrome_claim_integration_test.mjs",
     "scripts/comment_chrome_facebook_reader_test.mjs",
     "scripts/comment_chrome_fixture_contract_test.mjs",
@@ -48,9 +49,11 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_live_surface_observation_cases_test.mjs",
     "scripts/comment_chrome_node_frame_lifecycle_test.mjs",
     "scripts/comment_chrome_node_frame_mapping_test.mjs",
+    "scripts/comment_chrome_runtime_reconnect_test.mjs",
     "scripts/comment_chrome_scan_adapters_test.mjs",
     "scripts/comment_chrome_textarea_identity_test.mjs",
     "scripts/comment_chrome_threads_reader_test.mjs",
+    "scripts/comment_chrome_threads_icon_identity_test.mjs",
 }
 
 
@@ -114,6 +117,28 @@ def run_chrome_actuator_tests() -> None:
         "comment_chrome_actuator_test.mjs",
     ):
         subprocess.run([node, str(Path(__file__).with_name(name))], check=True)
+    reconnect_marker = (
+        "PASS source-owned Chrome explicit disconnect reconnection tests "
+        "(mocked; no browser)"
+    )
+    reconnect = subprocess.run(
+        [node, str(Path(__file__).with_name("comment_chrome_runtime_reconnect_test.mjs"))],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    if reconnect_marker not in reconnect.stdout.splitlines():
+        raise AssertionError("Chrome reconnect child success marker is missing")
+    print(reconnect.stdout, end="", flush=True)
+    target_tab_marker = (
+        "PASS source-owned exact target intake tab reuse tests "
+        "(mocked; no browser)"
+    )
+    target_tab = subprocess.run(
+        [node, str(Path(__file__).with_name("comment_chrome_target_tab_reuse_test.mjs"))],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    if target_tab_marker not in target_tab.stdout.splitlines():
+        raise AssertionError("Target intake tab reuse child success marker is missing")
+    print(target_tab.stdout, end="", flush=True)
     facebook_reader_marker = (
         "PASS Facebook native reader DOM, identity and URL drift tests "
         "(anonymous; no browser submission)"
@@ -136,6 +161,17 @@ def run_chrome_actuator_tests() -> None:
     if threads_reader_marker not in threads_reader.stdout.splitlines():
         raise AssertionError("Threads reader child success marker is missing")
     print(threads_reader.stdout, end="", flush=True)
+    threads_icon_marker = (
+        "PASS Threads reply icon stable-node identity tests "
+        "(anonymous; no browser)"
+    )
+    threads_icon = subprocess.run(
+        [node, str(Path(__file__).with_name("comment_chrome_threads_icon_identity_test.mjs"))],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    if threads_icon_marker not in threads_icon.stdout.splitlines():
+        raise AssertionError("Threads icon identity child success marker is missing")
+    print(threads_icon.stdout, end="", flush=True)
     fixture_runner = Path(__file__).with_name("comment_fixture_browser_e2e.mjs")
     subprocess.run([
         node, "--input-type=module", "--eval",

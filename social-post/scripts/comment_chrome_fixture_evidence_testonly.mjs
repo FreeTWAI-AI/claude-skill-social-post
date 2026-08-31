@@ -43,6 +43,7 @@ const FIXTURE_SOURCE_PATHS = Object.freeze([
   "scripts/comment_chrome_scan_fixture_testonly.mjs",
   "scripts/comment_chrome_send.mjs",
   "scripts/comment_chrome_send_support.mjs",
+  "scripts/comment_chrome_node_identity.mjs",
   ...ARCHITECTURE_EVALUATOR_PATHS,
   "scripts/comment_adapter_fixtures/facebook.html",
   "scripts/comment_adapter_fixtures/instagram.html",

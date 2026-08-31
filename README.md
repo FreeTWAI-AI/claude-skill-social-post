@@ -4,18 +4,22 @@
 
 目前穩定標籤：**v2.5.0**；`main` 已同步 **Unreleased candidate**。
 
-Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime revision／雜湊、架構自校準與單次送出／異常恢復的回歸測試。另已完成一次 IG 真實單次送出、原生子回覆查證與唯讀 recovery 對帳；這些證據不代表三平台 live Meta 回覆已解鎖。
+Unreleased candidate 有封閉 JavaScript 模組清單、固定 browser-runtime revision／雜湊、架構自校準與單次送出／異常恢復的回歸測試。另已完成一次 IG 真實單次送出、原生子回覆查證與唯讀 recovery 對帳，以及一次 Chrome 斷線後的來源連線恢復與原目標讀取；這些證據不代表三平台 live Meta 回覆已解鎖。
 
-> `main` 已分開讀取與送出開關：IG／Threads 指定原生留言的 target-only 回填已有實證；整篇掃描未開放，`live_browser_actuation_enabled` 仍預設為 `false`。真實送出／結果回讀未完成三平台 canary，不能宣稱全面自動回覆已完成。
+> `main` 已分開讀取與送出開關：FB／IG／Threads 指定原生留言的 target-only 回填各有實證；整篇掃描未開放，`live_browser_actuation_enabled` 仍預設為 `false`。真實送出／結果回讀未完成三平台 canary，不能宣稱全面自動回覆已完成。
 
 本候選版仍未完成三平台真實自動回覆驗收。過長契約與平台程式已按責任拆分，完整測試通過；但離線測試不能代替 FB／Threads 的登入操作、完整回覆串與父層驗證。穩定標籤仍為 v2.5.0，沒有新建正式 Release 或升級 production capability。
 
-本輪 Cleanup Mode A 為 0 FAIL、0 REVIEW、2 NOT_CHECKED，原 12 項長檔／長函式 REVIEW 已清除。跨語言圖與私版 `no-origin` 更新來源仍未驗證；Mode A 沒有涵蓋舊報告的 Git release 維度，不能把未測項算成通過。
+Cleanup 保留固定的程式長度警告與未測項，不以調高門檻消除問題。跨語言圖與私版 `no-origin` 更新來源仍未由 Cleanup 驗證；另有產品原生 JavaScript 架構圖，但不能把不同量尺或未測項當成同一份通過證明。
 
 ## Unreleased on main
 
-- 共用掃描、送出、領域驗證與各平台 DOM reader 已模組化；所有新增執行依賴仍納入來源雜湊與精確公開清單。架構檢查為 58 個模組、155 條內部依賴、0 循環。
-- 新增 FB 原生留言完整本文候選 reader，涵蓋 IMG.alt／BR、作者歧義、在線狀態連結、父子網址與驗證途中換頁的負向測試。實際回填在 Chrome 連線中斷時停止，未送出 FB 留言，不能視為 live 驗收通過。
+- 共用掃描、送出、領域驗證與各平台 DOM reader 已模組化；所有新增執行依賴仍納入來源雜湊與精確公開清單。模組與依賴數由當次架構測試產生，不用舊報告冒充本版證據。
+- 新增來源持有的 Chrome 明確斷線恢復：只在 cached browser 的精確斷線錯誤後重選一次，同一來源與 Chrome family，不清除防重送紀錄。空分頁、一般逾時、頁面失效及權限拒絕不觸發重連；已完成一次真實恢復後的指定留言讀取，不保證所有斷線原因均已排除。
+- 指定留言的唯讀 intake 優先使用唯一 exact-URL 分頁，重新核對 handle／URL 並保留既有分頁；沒有相符分頁才建立暫時分頁，多個相符則停止。送出與對帳流程不因此變更。
+- Threads 圖示式回覆按鈕新增獨立 semantic-SVG node binder，保留原有 IG／generic 文字識別；隱藏文字、額外圖示、標籤不一致或節點漂移一律拒絕。此 helper 本身不點擊、不填字、不授權送出。
+- 將文件唯讀核對與 runtime 權限狀態分離，將 DOM-CUA 節點識別與送出規則分離；原介面、防重送狀態與來源雜湊保護保留。
+- 新增 FB 原生留言完整本文 reader，涵蓋 IMG.alt／BR、作者歧義、在線狀態連結、父子網址與驗證途中換頁的負向測試。修正後已完成一則真實 exact-tab 重用、來源雙讀與私人帳本回填；不代表整篇或回覆串完整，未送出 FB 留言。
 - Threads 原生 reader 以明確的 root／focus pagelet context、原生時間連結、完整本文與帳號雙讀核對指定留言；一則真實 target-only 回填已完成。拒絕錯誤父層、截斷、載入中及 URL／帳號漂移；「尚無回覆」只記為候選訊號，不當作完整空串或送出授權。
 - 新增 `observeTargetComment`：只回填一則指定原生留言，保留完整作者／本文與來源憑證，不冒充整篇掃描完成。
 - 新增獨立的單則 IG `executeCanaryReply` 候選入口：只能使用已核准 action、最長 300 秒且限一次的來源綁定 lease；正式送出開關維持關閉，不因 canary 自動升級三平台能力。
