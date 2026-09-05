@@ -72,6 +72,7 @@ SEND_VALIDATION_LEAF_SOURCES = [
     "scripts/comment_browser_result_contract.py",
 ]
 LIVE_SURFACE_SOURCES = [
+    "scripts/comment_cua_runtime.mjs",
     "scripts/comment_chrome_live_surface.mjs",
     "scripts/comment_chrome_live_common.mjs",
     "scripts/comment_chrome_facebook_surface.mjs",
@@ -79,6 +80,9 @@ LIVE_SURFACE_SOURCES = [
     "scripts/comment_chrome_facebook_child_reader.mjs",
     "scripts/comment_chrome_threads_surface.mjs",
     "scripts/comment_chrome_threads_reader.mjs",
+    "scripts/comment_chrome_threads_canary_surface.mjs",
+    "scripts/comment_chrome_threads_modal_reader.mjs",
+    "scripts/comment_chrome_threads_result_reader.mjs",
     "scripts/comment_chrome_instagram_surface.mjs",
     "scripts/comment_chrome_instagram_reader.mjs",
 ]

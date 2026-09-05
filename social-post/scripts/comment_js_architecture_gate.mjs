@@ -24,6 +24,8 @@ import {
   evaluateReviewedExternalImports,
   finding,
   importPolicyFinding,
+  inventoryScopeDirectories,
+  isInventoryPath,
   isReviewedExternalDynamicImport,
   parseStaticModuleSpecifiers,
   resolveImport,
@@ -65,21 +67,23 @@ async function inventoryEntry(absolute) {
 }
 
 async function buildInventory() {
-  const entries = await readdir(SCRIPTS_ROOT, { withFileTypes: true });
-  const selected = entries.filter((entry) => (
-    entry.name.endsWith(".mjs")
-      && (entry.name.startsWith("comment_chrome_")
-        || entry.name.startsWith("comment_js_architecture_")
-        || entry.name === "comment_meta_snapshot_parser.mjs")
-  ));
-  const absoluteFiles = selected.map((entry) => {
-    if (!entry.isFile()) {
-      throw new Error(`closed inventory member is not a regular file: scripts/${entry.name}`);
+  const absoluteFiles = [];
+  for (const relativeDirectory of inventoryScopeDirectories()) {
+    const directory = resolve(SKILL_ROOT, relativeDirectory);
+    relativePath(directory);
+    const directoryStat = await lstat(directory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+      throw new Error(`closed inventory directory is not a regular directory: ${relativeDirectory}`);
     }
-    return resolve(SCRIPTS_ROOT, entry.name);
-  });
-  absoluteFiles.push(resolve(SCRIPTS_ROOT, "comment_fixture_browser_e2e.mjs"));
-  absoluteFiles.push(resolve(SCRIPTS_ROOT, "comment_adapter_fixtures", "fixture-runtime.js"));
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = `${relativeDirectory}/${entry.name}`;
+      if (!isInventoryPath(relative)) continue;
+      if (!entry.isFile()) {
+        throw new Error(`closed inventory member is not a regular file: ${relative}`);
+      }
+      absoluteFiles.push(resolve(directory, entry.name));
+    }
+  }
   const unique = [...new Set(absoluteFiles)].sort((left, right) => (
     relativePath(left).localeCompare(relativePath(right))
   ));

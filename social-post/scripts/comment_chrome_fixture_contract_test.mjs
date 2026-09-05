@@ -282,12 +282,33 @@ export async function testThreePlatformFixtureContract() {
   const savedInventory = [
     { path: "scripts/comment_chrome_actuator.mjs", bytes: 100, sha256: digest("actuator"), role: "production" },
     { path: "scripts/comment_chrome_send.mjs", bytes: 200, sha256: digest("send"), role: "production" },
+    { path: "scripts/comment_cua_runtime.mjs", bytes: 210, sha256: digest("cua-runtime"), role: "production" },
+    { path: "scripts/comment_cua_runtime_test.mjs", bytes: 220, sha256: digest("cua-runtime-test"), role: "test" },
+    { path: "scripts/comment_cua_dispatch_test.mjs", bytes: 230, sha256: digest("cua-dispatch-test"), role: "test" },
     { path: "scripts/comment_js_architecture_gate.mjs", bytes: 300, sha256: digest("gate"), role: "tools" },
   ];
   const currentInventory = savedInventory.map((row) => ({
     path: row.path, exists: true, size: row.bytes, sha256: row.sha256,
   }));
   assert.equal(testOnlyValidateArchitectureInventorySnapshot(savedInventory, currentInventory), true);
+  for (const cuaPath of [
+    "scripts/comment_cua_runtime.mjs", "scripts/comment_cua_runtime_test.mjs",
+    "scripts/comment_cua_dispatch_test.mjs",
+  ]) {
+    assert.throws(
+      () => testOnlyValidateArchitectureInventorySnapshot(savedInventory,
+        currentInventory.filter((row) => row.path !== cuaPath)),
+      /inventory is not the exact current closed set/u,
+      `independent fixture inventory must not omit ${cuaPath}`,
+    );
+    assert.throws(
+      () => testOnlyValidateArchitectureInventorySnapshot(savedInventory,
+        currentInventory.map((row) => row.path === cuaPath
+          ? { ...row, sha256: digest("changed-cua-source") } : row)),
+      /inventory is stale/u,
+      `independent fixture inventory must rehash ${cuaPath}`,
+    );
+  }
   assert.throws(
     () => testOnlyValidateArchitectureInventorySnapshot(savedInventory, currentInventory.map(
       (row) => row.path === "scripts/comment_chrome_actuator.mjs"

@@ -15,8 +15,13 @@ import {
 } from "./comment_chrome_send_support.mjs";
 import { getSourceOwnedChromeBrowser } from "./comment_chrome_runtime_authority.mjs";
 import {
+  getCommentCuaBrowser, hasCommentCuaRuntime, installCommentCuaRuntime,
+  isCommentCuaTab, requireCommentCuaTab,
+} from "./comment_cua_runtime.mjs";
+import {
   bindLiveReplyBrowser, bindLiveSubmitNode, inspectLiveReplySurface, liveReplyUrl,
   prepareLiveReplyThread, inspectLiveCanaryResult, readLiveTargetComment,
+  inspectLiveCanarySurface, revalidateThreadsSelection,
   LIVE_REPLY_ADAPTER_VERSION,
 } from "./comment_chrome_live_surface.mjs";
 
@@ -33,6 +38,35 @@ const liveReplyRecoveryContexts = new Map();
 const liveReplyRecoveryInFlight = new Set();
 const liveCanaryContexts = new WeakSet();
 const liveCanarySelections = new WeakMap();
+
+// CUA is bootstrapped once by the documented tool host. It is a separate
+// transport, not an emulation of the retired pinned browser-client runtime.
+async function getLiveCommentBrowser() {
+  return hasCommentCuaRuntime() ? getCommentCuaBrowser() : getSourceOwnedChromeBrowser();
+}
+
+async function createLiveCommentTab(browser, url) {
+  if (hasCommentCuaRuntime()) return browser.tabs.new(url);
+  const tab = await browser.tabs.new();
+  try { await tab.goto(url); return tab; }
+  catch (error) { try { await tab.close(); } catch { /* no retry */ } throw error; }
+}
+
+async function requireLiveSubmitTransport(tab, action, canary) {
+  if (isCommentCuaTab(tab)) {
+    await requireCommentCuaTab(tab, liveReplyUrl(action));
+    // Native selected-modal continuity is implemented for Threads. Other
+    // platforms must migrate their selection contracts before CUA can send.
+    if (!canary || action.scope.platform !== "threads") {
+      fail("CUA submit is available only for the native Threads single-action candidate");
+    }
+    return "cua_semantic_selection";
+  }
+  if (!tab.dom_cua || typeof tab.dom_cua.click !== "function") {
+    fail("live reply requires a supported source-bound submit transport");
+  }
+  return "legacy_dom_node";
+}
 
 async function requireLiveReplyPolicy(canary) {
   if (canary !== undefined) {
@@ -165,21 +199,42 @@ async function readExactLiveComposer(composer) {
   return value.normalize("NFC");
 }
 
+async function isEmptyThreadsComposer(composer) {
+  return composer.evaluate((element) => {
+    if (element.getAttribute("contenteditable") !== "true"
+        || element.getAttribute("role") !== "textbox" || element.textContent !== ""
+        || !["", "\n"].includes(element.innerText)) return false;
+    const children = Array.from(element.childNodes);
+    if (children.length === 0) return element.innerText === "";
+    if (children.length !== 1) return false;
+    const paragraph = children[0];
+    if (paragraph.nodeType !== 1 || paragraph.tagName !== "P"
+        || paragraph.getAttribute("dir") !== "auto" || paragraph.childNodes.length !== 1) return false;
+    const linebreak = paragraph.childNodes[0];
+    return linebreak.nodeType === 1 && linebreak.tagName === "BR"
+      && linebreak.getAttribute("data-lexical-managed-linebreak") === "true"
+      && linebreak.childNodes.length === 0;
+  });
+}
+
 function requireCanaryThread(surface, action) {
   const proof = surface?.replyExhaustionCandidate;
-  if (action.scope.platform !== "instagram" || surface?.exhaustiveThread !== true
+  const threads = action.scope.platform === "threads";
+  if (!["instagram", "threads"].includes(action.scope.platform) || surface?.exhaustiveThread !== true
       || !proof || proof.candidate_only !== true || proof.stable_reads !== 2
       || proof.action_digest !== actionDigest(action)
       || proof.observed_count !== surface.totalReplies || surface.ownReplyCount !== 0
       || surface.exactOwnCount !== 0 || !Number.isSafeInteger(surface.totalReplies)
-      || surface.totalReplies < 1 || proof.observed_url !== liveReplyUrl(action)) {
+      || (threads ? surface.totalReplies !== 0 || proof.kind !== "threads_explicit_zero" : surface.totalReplies < 1)
+      || proof.observed_url !== liveReplyUrl(action)) {
     fail("canary has no exhaustive native zero-own target thread");
   }
   return surface;
 }
 
 async function inspectReadyLiveComposer(tab, action, canary) {
-  const observed = await inspectLiveReplySurface(tab, action, "before");
+  const observed = canary ? await inspectLiveCanarySurface(tab, action)
+    : await inspectLiveReplySurface(tab, action, "before");
   const surface = canary
     ? requireCanaryThread(observed, action)
     : requireCompleteLiveSurface(observed, { requireNoOwnReply: true });
@@ -195,7 +250,9 @@ async function inspectReadyLiveComposer(tab, action, canary) {
     if (!selected || selected.action_digest !== actionDigest(action)
         || selected.observed_url !== surface.observedUrl
         || digestObject(selected.document_binding) !== digestObject(surface.replyExhaustionCandidate.document_binding)
-        || await bindLiveSubmitNode(tab, composer) !== selected.composer_node_id) {
+        || (action.scope.platform === "threads"
+          ? (await revalidateThreadsSelection(tab, action)).selection_digest !== selected.selection_digest
+          : await bindLiveSubmitNode(tab, composer) !== selected.composer_node_id)) {
       fail("canary composer lost its source-owned parent selection");
     }
   }
@@ -205,6 +262,9 @@ async function inspectReadyLiveComposer(tab, action, canary) {
 async function prepareLiveCanaryReply(tab, action, plan, canary) {
   await requireLiveReplyPolicy(canary);
   requireCurrentReplyPermit(action);
+  // Detect incompatible transport before selecting a parent or filling text.
+  await requireLiveSubmitTransport(tab, action, canary);
+  if (action.scope.platform === "threads") return prepareThreadsLiveReply(tab, action, plan, canary);
   let surface = requireCanaryThread(await prepareLiveReplyThread(tab, action), action);
   surface = requireCanaryThread(await inspectLiveReplySurface(tab, action, "before"), action);
   const initialComposer = await unique(surface.composer, "canary untouched composer", { enabled: true });
@@ -259,6 +319,38 @@ async function prepareLiveCanaryReply(tab, action, plan, canary) {
   };
   receipt.preparation_id = digestObject(preparationCore(receipt));
   return immutableJsonSnapshot(receipt, "live canary preparation");
+}
+
+async function prepareThreadsLiveReply(tab, action, plan, canary) {
+  const selected = requireCanaryThread(await prepareLiveReplyThread(tab, action), action);
+  const composer = await unique(selected.composer, "Threads source-selected empty composer", { enabled: true });
+  if (!selected.selectedParentCandidate || !(await isEmptyThreadsComposer(composer))) {
+    fail("Threads source-selected composer is not empty");
+  }
+  liveCanarySelections.set(tab, immutableJsonSnapshot({
+    action_digest: actionDigest(action), observed_url: selected.observedUrl,
+    document_binding: selected.replyExhaustionCandidate.document_binding,
+    selection_digest: selected.selection_digest,
+  }, "Threads source-selected composer binding"));
+  await requireLiveReplyPolicy(canary);
+  requireCurrentReplyPermit(action);
+  const fresh = await revalidateThreadsSelection(tab, action);
+  if (!(await isEmptyThreadsComposer(fresh.composer))) fail("Threads draft changed before fill");
+  await fresh.composer.fill(action.reply_text, { timeoutMs: 5000 });
+  const ready = await inspectReadyLiveComposer(tab, action, canary);
+  const receipt = {
+    schema_version: 1, test_only: false, action_id: action.action_id,
+    intent_id: action.intent_id, session_id: action.session_id, permit_id: action.permit_id,
+    scope: action.scope, comment_fingerprint: action.comment_fingerprint,
+    reply_hash: action.reply_hash, action_digest: actionDigest(action), plan_digest: digestObject(plan),
+    observed_url: ready.observedUrl, observed_at: nowIso(),
+    baseline_exact_reply_count: 0, baseline_total_reply_count: 0,
+    account_verified: true, post_verified: true, target_verified: true, body_complete: true,
+    composer_empty_before_fill: true, composer_matches_reply: true, reply_control_verified: true,
+    evidence: "Threads single-action candidate: explicit native zero marker, exact parent and account, source-selected empty modal, approved text readback; semantic UI continuity only",
+  };
+  receipt.preparation_id = digestObject(preparationCore(receipt));
+  return immutableJsonSnapshot(receipt, "Threads empty-composer preparation");
 }
 
 async function prepareLiveReply(tab, action, plan) {
@@ -350,10 +442,8 @@ async function submitLiveReplyAndFinish(tab, action, plan, preparation, canary) 
       || before.totalReplies < preparation.baseline_total_reply_count) {
     fail("live reply context changed before the durable claim");
   }
-  if (!tab.dom_cua || typeof tab.dom_cua.click !== "function") {
-    fail("live reply requires the trusted DOM-CUA submit surface");
-  }
-  const nodeId = await bindLiveSubmitNode(tab, before.submit);
+  const transport = await requireLiveSubmitTransport(tab, action, canary);
+  const nodeId = transport === "legacy_dom_node" ? await bindLiveSubmitNode(tab, before.submit) : null;
   if (liveReplyExecutionReservations.has(action.action_id)) {
     fail("a second in-process execution of this approved live action is blocked");
   }
@@ -374,16 +464,30 @@ async function submitLiveReplyAndFinish(tab, action, plan, preparation, canary) 
         || afterClaim.totalReplies < preparation.baseline_total_reply_count) {
       fail("live reply context changed after the durable claim");
     }
-    if (await bindLiveSubmitNode(tab, afterClaim.submit) !== nodeId) {
+    if (transport === "legacy_dom_node" && await bindLiveSubmitNode(tab, afterClaim.submit) !== nodeId) {
       fail("live reply submit node changed after the durable claim");
     }
-    if (!tab.dom_cua || typeof tab.dom_cua.click !== "function") {
-      fail("live reply requires the trusted DOM-CUA submit surface");
-    }
+    if (await requireLiveSubmitTransport(tab, action, canary) !== transport) fail("live submit transport changed");
     authorization = await requireLiveReplyPolicy(canary);
     requireCurrentReplyPermit(action);
-    attempted = true;
-    await tab.dom_cua.click({ node_id: nodeId });
+    if (transport === "cua_semantic_selection") {
+      // Lease I/O may take time. Resolve and re-read the exact native parent,
+      // actor, selected modal and approved text AFTER that I/O, just before
+      // one documented locator click. This is semantic UI continuity, not a
+      // persistent DOM-node or atomic browser-transaction guarantee.
+      await requireCommentCuaTab(tab, preparation.observed_url);
+      const finalSurface = await inspectReadyLiveComposer(tab, action, canary);
+      if (finalSurface.observedUrl !== preparation.observed_url
+          || finalSurface.totalReplies !== preparation.baseline_total_reply_count) {
+        fail("CUA selected reply context changed immediately before submit");
+      }
+      requireCurrentReplyPermit(action);
+      attempted = true;
+      await finalSurface.submit.click({ timeoutMs: 5000 });
+    } else {
+      attempted = true;
+      await tab.dom_cua.click({ node_id: nodeId });
+    }
   } catch (error) {
     dispatchError = String(error?.message ?? error).slice(0, 500);
   }
@@ -431,11 +535,11 @@ async function executeLiveApprovedReply(rawRequest) {
     adapter_version: "2026-08-31.1", platform: action.scope.platform,
     target_url: targetUrl, comment_anchor: action.comment_anchor,
   }, "source-owned live reply plan");
-  const browser = await getSourceOwnedChromeBrowser();
-  const tab = await browser.tabs.new();
+  const browser = await getLiveCommentBrowser();
+  const tab = await createLiveCommentTab(browser, targetUrl);
   try {
     bindLiveReplyBrowser(tab, browser);
-    await tab.goto(targetUrl);
+    await requireLiveSubmitTransport(tab, action);
     const preparation = await prepareLiveReply(tab, action, plan);
     return await submitLiveReplyAndFinish(tab, action, plan, preparation);
   } finally {
@@ -458,22 +562,20 @@ async function executeLiveCanaryReply(rawRequest) {
   }
   for (const key of keys) requiredString(request[key], `canary request.${key}`);
   const action = await readApprovedReplyAction(request.intentId, request.sessionId, request.leaseId);
-  if (action.scope.platform !== "instagram") fail("single-action live canary currently supports only the verified Instagram native shape");
+  if (!["instagram", "threads"].includes(action.scope.platform)) fail("single-action live canary has no native preparation for this platform");
   const canary = { ...request, action };
   liveCanaryContexts.add(canary);
   await requireLiveReplyPolicy(canary);
   if (liveReplyExecutionReservations.has(action.action_id)) fail("live canary action has already been reserved");
-  const plan = immutableJsonSnapshot({ schema_version: 1, adapter_id: "source-owned-instagram-single-action-canary",
+  const plan = immutableJsonSnapshot({ schema_version: 1, adapter_id: `source-owned-${action.scope.platform}-single-action-canary`,
     adapter_version: LIVE_REPLY_ADAPTER_VERSION, platform: action.scope.platform,
     target_url: liveReplyUrl(action), comment_anchor: action.comment_anchor,
   }, "single-action native canary plan");
-  const browser = await getSourceOwnedChromeBrowser();
-  const tab = await browser.tabs.new();
+  const browser = await getLiveCommentBrowser();
+  const tab = await createLiveCommentTab(browser, plan.target_url);
   try {
     bindLiveReplyBrowser(tab, browser);
-    await tab.goto(plan.target_url);
-    await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
-    await waitForNativeParent(tab, action.comment_anchor.comment_permalink);
+    await waitForNativeParent(tab, action);
     const preparation = await prepareLiveCanaryReply(tab, action, plan, canary);
     return await submitLiveReplyAndFinish(tab, action, plan, preparation, canary);
   } finally {
@@ -482,7 +584,15 @@ async function executeLiveCanaryReply(rawRequest) {
   }
 }
 
-async function waitForNativeParent(tab, permalink) {
+async function waitForNativeParent(tab, action) {
+  const permalink = action.comment_anchor.comment_permalink;
+  if (action.scope.platform === "threads") {
+    await tab.playwright.getByRole("region", { name: "直欄內文", exact: true })
+      .getByRole("link").filter({ has: tab.playwright.locator("time") })
+      .and(tab.playwright.locator(`a[href=${JSON.stringify(new URL(permalink).pathname)}]`))
+      .waitFor({ state: "visible", timeoutMs: 15000 });
+    return;
+  }
   const path = `${new URL(permalink).pathname.replace(/\/$/u, "")}/`;
   await tab.playwright.locator(`article a[href=${JSON.stringify(path)}]`)
     .waitFor({ state: "visible", timeoutMs: 15000 });
@@ -608,6 +718,15 @@ async function inspectCanaryReinspectionReceipt(tab, context, sessionId) {
   let observed;
   let detail = "no positive native reply confirmation";
   try {
+    if (action.scope.platform === "threads") {
+      const result = await inspectLiveCanaryResult(tab, action);
+      if (!result.verifiedNewReply || result.ownReplyCount !== 1 || result.exactOwnCount !== 1
+          || result.totalReplies < preparation.baseline_total_reply_count + 1) {
+        fail("Threads recovery found no verified exact own child");
+      }
+      observed = result;
+      detail = "fresh native Threads child permalink confirms the original reply under the exact parent; no submit or absence inference";
+    } else {
     const first = await prepareLiveReplyThread(tab, action);
     const second = await inspectLiveReplySurface(tab, action, "after");
     if (!first.exhaustiveThread || !second.exhaustiveThread
@@ -620,46 +739,49 @@ async function inspectCanaryReinspectionReceipt(tab, context, sessionId) {
     }
     observed = second;
     detail = "fresh native target expansion and two stable reads confirm the original canary's exact own reply; no submit or absence inference";
+    }
   } catch (error) {
     detail = `canary recovery remains unknown: ${String(error?.message ?? error).slice(0, 500)}`;
   }
-  const positive = Boolean(observed);
+  if (!observed) {
+    // This positive-only reader did not establish the context required by a
+    // reconcile receipt. Preserve the existing uncertain attempt/capability;
+    // do not fabricate context flags, zero-count absence, or a ledger event.
+    return Object.freeze({
+      action_id: action.action_id, intent_id: action.intent_id,
+      inspection_status: "unresolved", outcome: "unknown",
+      committed: false, reconcile_required: true, evidence: detail,
+    });
+  }
   return immutableJsonSnapshot({
     schema_version: 1, test_only: false,
     action_id: action.action_id, intent_id: action.intent_id, session_id: sessionId,
     attempt_session_id: attempt.attempt_session_id, scope: action.scope,
     comment_fingerprint: action.comment_fingerprint, reply_hash: action.reply_hash,
     preparation_id: preparation.preparation_id, claim_id: attempt.claim_id, preflight_id: attempt.preflight_id,
-    observed_url: observed?.observedUrl ?? preparation.observed_url ?? liveReplyUrl(action), observed_at: nowIso(),
-    account_verified: positive, post_verified: positive, target_verified: positive, parent_verified: positive,
-    exact_reply_visible: positive, own_author_verified: positive, absence_verified: false,
-    own_author_reply_count: observed?.ownReplyCount ?? 0,
-    reinspection_total_reply_count: observed?.totalReplies ?? 0, evidence: detail,
+    observed_url: observed.observedUrl, observed_at: nowIso(),
+    account_verified: true, post_verified: true, target_verified: true, parent_verified: true,
+    exact_reply_visible: true, own_author_verified: true, absence_verified: false,
+    own_author_reply_count: observed.ownReplyCount,
+    reinspection_total_reply_count: observed.totalReplies, evidence: detail,
   }, "positive-only canary recovery receipt");
 }
 
 async function withPrivateRecoveryTab(context, inspect) {
-  const browser = await getSourceOwnedChromeBrowser();
-  const tab = await browser.tabs.new();
-  try {
-    bindLiveReplyBrowser(tab, browser);
-    await tab.goto(liveReplyUrl(context.action));
+  return withSourceOwnedTargetIntakeTab(liveReplyUrl(context.action), async (tab) => {
     if (context.attempt.canary_lease_id) {
-      await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
-      await waitForNativeParent(tab, context.action.comment_anchor.comment_permalink);
+      await waitForNativeParent(tab, context.action);
     }
     return await inspect(tab);
-  } finally {
-    try {
-      await Promise.race([tab.close(), new Promise((resolve) => setTimeout(resolve, 2000))]);
-    } catch {
-      // Tab cleanup never retries recovery, claim, receipt commit, or submission.
-    }
-  }
+  });
 }
 
-async function commitLiveReinspection(tab, context, request) {
-  const receipt = await inspectLiveReinspectionReceipt(tab, context, request.sessionId);
+async function commitLiveReinspection(context, request) {
+  const receipt = await withPrivateRecoveryTab(context,
+    (tab) => inspectLiveReinspectionReceipt(tab, context, request.sessionId));
+  // The source-owned wrapper has checked the exact tab identity/URL again.
+  // A borrowed tab is never closed or reloaded, including on failed inspection.
+  if (receipt.inspection_status === "unresolved") return receipt;
   if (!context.attempt.canary_lease_id) await requireLiveReplyPolicy();
   const commit = await commitPythonLedgerBrowserReceipt(
     context.claimSubmit, "browser-reconcile", receipt,
@@ -680,21 +802,24 @@ async function recoverLiveApprovedReply(rawRequest) {
     const claimSubmit = createPythonLedgerClaimSubmit({ preparation: original.preparation });
     if (!isPythonLedgerClaimSubmit(claimSubmit)) fail("live recovery requires the default ledger bridge");
     const context = Object.freeze({ ...original, claimSubmit });
-    return await withPrivateRecoveryTab(context, async (tab) => {
-      // Inspect before rotating authority, then inspect afresh before committing.
+    const inspected = await withPrivateRecoveryTab(context, async (tab) => {
+      // Inspect before rotating authority; the wrapper also verifies the final
+      // source identity/URL before this observation can authorize rotation.
       if (original.attempt.canary_lease_id) {
-        await inspectCanaryReinspectionReceipt(tab, context, request.sessionId);
+        return inspectCanaryReinspectionReceipt(tab, context, request.sessionId);
       } else {
         requireCompleteLiveSurface(await inspectLiveReplySurface(tab, original.action, "after"));
         await requireLiveReplyPolicy();
       }
-      const recovered = await recoverPythonLedgerReconcile(claimSubmit, request);
-      if (recovered.attempt_session_id !== original.attempt.attempt_session_id) {
-        fail("live recovery changed the original attempt session");
-      }
-      liveReplyRecoveryContexts.set(request.key, context);
-      return commitLiveReinspection(tab, context, request);
     });
+    if (inspected?.inspection_status === "unresolved") return inspected;
+    const recovered = await recoverPythonLedgerReconcile(claimSubmit, request);
+    if (recovered.attempt_session_id !== original.attempt.attempt_session_id) {
+      fail("live recovery changed the original attempt session");
+    }
+    liveReplyRecoveryContexts.set(request.key, context);
+    // Fresh source-owned inspection after rotation; failures retain context.
+    return await commitLiveReinspection(context, request);
   } finally {
     liveReplyRecoveryInFlight.delete(request.key);
   }
@@ -708,7 +833,7 @@ async function reconcileLiveUncertainReply(rawRequest) {
   liveReplyRecoveryInFlight.add(request.key);
   try {
     if (!context.attempt.canary_lease_id) await requireLiveReplyPolicy();
-    return await withPrivateRecoveryTab(context, (tab) => commitLiveReinspection(tab, context, request));
+    return await commitLiveReinspection(context, request);
   } finally {
     liveReplyRecoveryInFlight.delete(request.key);
   }
@@ -1371,6 +1496,7 @@ function createScanAndCommit(scanPost, {
 }
 
 async function requireExactTargetIntakeTab(tab, expectedUrl, expectedTabId) {
+  if (isCommentCuaTab(tab)) await requireCommentCuaTab(tab, expectedUrl);
   if (!tab || tab.id !== expectedTabId || typeof tab.url !== "function") {
     fail("native target intake tab identity changed");
   }
@@ -1384,7 +1510,7 @@ async function requireExactTargetIntakeTab(tab, expectedUrl, expectedTabId) {
 /** Listing locates a source-owned tab; it is never native observation evidence. */
 async function withSourceOwnedTargetIntakeTab(commentPermalink, inspect) {
   const expectedUrl = canonicalUrl(commentPermalink).toString();
-  const browser = await getSourceOwnedChromeBrowser();
+  const browser = await getLiveCommentBrowser();
   const listed = await browser.tabs.list();
   if (!Array.isArray(listed)) fail("native target intake tab listing is malformed");
   const matches = [];
@@ -1402,14 +1528,13 @@ async function withSourceOwnedTargetIntakeTab(commentPermalink, inspect) {
   }
   if (matches.length > 1) fail("native target intake has multiple exact URL tabs");
   const created = matches.length === 0;
-  const tab = created ? await browser.tabs.new() : await browser.tabs.get(matches[0]);
+  const tab = created ? await createLiveCommentTab(browser, expectedUrl) : await browser.tabs.get(matches[0]);
   try {
     const tabId = requiredString(tab?.id, "native target intake tab id");
     if (tabId !== tab.id || (!created && tabId !== matches[0])) {
       fail("native target intake resolved tab differs from the source listing");
     }
     bindLiveReplyBrowser(tab, browser);
-    if (created) await tab.goto(expectedUrl);
     await requireExactTargetIntakeTab(tab, expectedUrl, tabId);
     const result = await inspect(tab);
     await requireExactTargetIntakeTab(tab, expectedUrl, tabId);
@@ -1450,7 +1575,8 @@ async function observeLiveTargetComment(rawTarget) {
   const { first, second } = await withSourceOwnedTargetIntakeTab(request.target.comment_permalink, async (tab) => {
     if (request.platform === "instagram") {
       await tab.playwright.locator("article").waitFor({ state: "visible", timeoutMs: 15000 });
-      await waitForNativeParent(tab, request.target.comment_permalink);
+      await waitForNativeParent(tab, { scope: { platform: request.platform },
+        comment_anchor: { comment_permalink: request.target.comment_permalink } });
     } else if (request.platform === "threads") {
       const column = tab.playwright.locator('[role="region"][aria-label="直欄內文"]');
       await column.waitFor({ state: "visible", timeoutMs: 15000 });
@@ -1611,4 +1737,10 @@ export function createCommentChromeActuator(options = {}) {
     reinspectAndReconcile,
     recoverAndReconcile,
   });
+}
+
+/** Install and create through one module graph, preserving the runtime singleton. */
+export async function createCommentCuaActuator(cua, options) {
+  await installCommentCuaRuntime(cua, options);
+  return createCommentChromeActuator();
 }

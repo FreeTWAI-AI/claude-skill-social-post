@@ -7,7 +7,7 @@ description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語
 
 把內容生成、實際發布與成效學習分開。依意圖只讀必要資料，不把整個案例庫一次塞進 context。
 
-P5 執行前先核對 `references/chrome-comment-adapter.md` 的當前狀態：指定原生留言的 target-only 回填與限一則 IG canary 已完成一次真實送出、原生子回覆查證及唯讀 recovery 對帳；泛用 production 送出開關仍關閉。target-only 不代表整篇／回覆串已掃完，UI continuity 不代表實體 document epoch。單則實證不代表三平台完整自動回覆完成，也不會自動升級 capability；不得用 fixture 或候選程式存在代替其他真實送出證據。
+P5 執行前先核對 `references/chrome-comment-adapter.md` 的當前狀態：舊 SDK 的 IG 單則 canary 已完成真實送出及唯讀 recovery 對帳；2026-09-05 當前 CUA 的 Threads 單則 canary 已送出一次並取得原生 own-child 正向觀測，canonical ledger 尚為 `needs_reconcile`。exact-tab recovery 來源修正已通過 focused tests；當前 Chrome 控制連線無法進行原生檢查，真實唯讀結算尚待恢復連線後完成，未新增 recovery／rotation 事件。當前 CUA 送出只支援 Threads 單則候選，泛用 production 仍關閉。target-only 不代表整篇／回覆串已掃完，semantic UI continuity 不代表實體 document epoch 或持久 node identity。單則實證不代表三平台完整自動回覆完成，也不會自動升級 capability；不得用 fixture 或候選程式存在代替其他真實送出證據。
 
 ## Session 啟動
 
@@ -78,13 +78,13 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 
 ## 實際發佈與留言安全閘
 
-只有 P2 的實際發布與 P5 的實際掃描／回覆需要 `chrome:control-chrome` 與已登入狀態；草稿、規劃、分析、資料回填與 P5 ledger 操作不需要。
+只有 P2 的實際發布與 P5 的實際掃描／回覆需要已登入的 Chrome UI 工具；P5 依 runtime reference 使用當前文件化 CUA，舊 `chrome:control-chrome` 僅限仍提供對應 SDK 的環境。草稿、規劃、分析、資料回填與 P5 ledger 操作不需要瀏覽器。
 
 - 發佈前必須在當前對話取得明確「確認」。
 - 使用者若在當前 session 明示「你自己操作不用問」，私人版可免逐次確認；不跨 session。
 - 不幫登入、不改帳號／隱私、不刪文、不自動按讚／follow／大量留言。
-- P5 掃描前先以當前 session 建立有期限的 browser scan request，Chrome receipt 只能回綁既定帳號／貼文 scope，完成掃描即追加可區分零留言的 completion event。production scan 模組不含 fixture factory，只接受 source-controlled、trusted-host-resolved、版本化、deep-frozen 且 process-branded 的 FB／IG／Threads plan；目前 live adapter 全部 unavailable。完整展開必須由 versioned exhaustion contract 證明 cursor traversal、monotonic discovered count、explicit terminal 與 terminal coverage；兩次空 viewport read、raw selector、fake tab、caller resolver 或 `threadExpansionComplete` 宣告都無效。P5 預設 `batch_confirm`；`bounded_auto` 只在當前 session 明示平台、帳號、貼文與本輪範圍後，以有期限、指定 scope、有限次數的 ledger grant 啟用。每則回覆都要一次性 permit；重算 reply hash，綁定 action／fresh locator／正確父留言與零 exact-own baseline；reply thread 在碰 trigger、消耗 durable claim、finish 與 recovery reinspection 前都要另以 version 1 exhaustion 證明 target-scoped cursor／count／traversal／terminal stable coverage，`0` reply 或 `0` expander 不構成 absence。later page／lazy expander、無 terminal、virtualization 或 same-fingerprint replacement 一律零 submit click、claim 前發現則零 claim，recovery 不得推導 not-sent。之後才可經 durable atomic claim、process-wide 單次送出及完整畫面驗證。finish／reconcile 另須由 shell:false branded bridge 持有 versioned 一次性 capability；ledger 只存 nonce hash、scope binding 與 receipt digest。裸 `WRITE_OK`、raw／fixture receipt、偽 nonce、重播 capability、未全展開或不可檢查的回覆串一律拒絕；分批執行不得重置 grant 上限。
-- 正式版 `comment-policy.json` 的 `live_browser_actuation_enabled` 預設為 `false`；來源綁定的只讀回填另受 `live_browser_scan_enabled` 控制。泛用送出仍關閉；首次 IG 驗證只可使用當前 session 明確授權、綁定已核准 action／source digest、最長 300 秒且限一則的 canonical canary lease，經來源持有的 `executeCanaryReply` 執行。lease 不開啟 production、不升級 capability、不允許 caller 偽造 preparation；`@author` 原生帶入須如實記錄，成功只認正確父留言下的新 exact-own 回覆，未知立即停止且不得重送。
+- P5 完整掃描前先以當前 session 建立有期限的 browser scan request，Chrome receipt 只能回綁既定帳號／貼文 scope，完成掃描即追加可區分零留言的 completion event。production scan 模組不含 fixture factory，只接受 source-controlled、trusted-host-resolved、版本化、deep-frozen 且 process-branded 的 FB／IG／Threads plan；目前泛用完整掃描 registry 全部 unavailable，指定留言 target-only 回填是獨立範圍。完整展開必須由 versioned exhaustion contract 證明 cursor traversal、monotonic discovered count、explicit terminal 與 terminal coverage；兩次空 viewport read、raw selector、fake tab、caller resolver 或 `threadExpansionComplete` 宣告都無效。P5 預設 `batch_confirm`；`bounded_auto` 只在當前 session 明示平台、帳號、貼文與本輪範圍後，以有期限、指定 scope、有限次數的 ledger grant 啟用。每則回覆都要一次性 permit；重算 reply hash，綁定 action／fresh locator／正確父留言與零 exact-own baseline。泛用送出契約在碰 trigger、消耗 durable claim、finish 與 recovery reinspection 前，另以 version 1 exhaustion 證明 target-scoped cursor／count／traversal／terminal stable coverage；`0` reply 或 `0` expander 不構成 absence。later page／lazy expander、無 terminal、virtualization 或 stable-node replacement 不能當泛用完整證據，claim 前發現則零 claim／submit，recovery 不得推導 not-sent。Threads 單則候選另用原生 explicit-zero marker、兩次穩定讀取與來源點選的空 modal；只提供 semantic selection，不取得泛用 complete／absence 或持久節點 authority。之後才可經 durable atomic claim、process-wide 單次送出及原生結果驗證。finish／reconcile 另須由 shell:false branded bridge 持有 versioned 一次性 capability；ledger 只存 nonce hash、scope binding 與 receipt digest。裸 `WRITE_OK`、raw／fixture receipt、偽 nonce、重播 capability，或冒充完整掃描的部分回覆串一律拒絕；分批執行不得重置 grant 上限。
+- 正式版 `comment-policy.json` 的 `live_browser_actuation_enabled` 預設為 `false`；來源綁定的只讀回填另受 `live_browser_scan_enabled` 控制。泛用送出仍關閉；單則候選只可使用當前 session 明確授權、綁定已核准 action／source digest、最長 300 秒且限一則的 canonical canary lease，經來源持有的 `executeCanaryReply` 執行。當前 CUA 只接 Threads；IG 是舊 SDK 的歷史實證。lease 不開啟 production、不升級 capability、不允許 caller 偽造 preparation；IG 的 `@author` 原生帶入與 Threads 的真正空 modal 分別如實記錄。成功只認正確父留言下的新 exact-own 回覆及有效帳本結算，未知立即停止且不得重送。
 - 送出結果不明時標記 `needs_reconcile` 並停止整批；未重新讀取畫面前不得重送。零 API Chrome 模式不宣稱 24/7 背景監聽。
 - `send_started`／`needs_reconcile` 後若 Node／Chrome 重啟或 receipt capability 過期，只能由 fused actuator 以 fresh session 進入 reconcile recovery；bearer 留在私有 Node 閉包，保留原 attempt、不得重發 submit claim、不得退回 `approved`。
 - P5 不處理私訊、媒體／GIF 回覆或全帳號歷史爬取；大量 keyword 索取改用單一公開作者留言提供自助入口。
@@ -95,6 +95,8 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 ## 平台規則
 
 平台規格會變。Hashtag、字數、發佈 UI、演算法等時效規則只在目標平台 reference 維護，標示 last verified；跨 skill 衝突時先查權威來源，不同時保留兩個硬數字。
+
+UI 改版只更新已授權平台的 reader／selection／result 模組及相應測試，不重寫或放寬共用 ledger、permit 與單次 claim 契約。權限拒絕、CAPTCHA、checkpoint 或平台限制必須暫停，不以換 URL、runtime、帳號或自動重試繞過，也不保證不中斷運作。
 
 ## 維護
 

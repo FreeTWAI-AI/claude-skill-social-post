@@ -11,7 +11,7 @@ from typing import Any
 
 from comment_browser_contract import replay_browser_scan_requests
 from comment_state import validate_comment_store
-from comment_store import comment_store_revision, commit_comment_records, load_comment_records
+from comment_store import commit_comment_records, load_comment_snapshot
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -58,7 +58,7 @@ def load_policy(root: Path = SKILL_ROOT) -> dict[str, Any]:
 def load_state(
     root: Path = SKILL_ROOT,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], dict[str, Any]]:
-    records = load_comment_records(root / "data")
+    records, revision = load_comment_snapshot(root / "data")
     policy = load_policy(root)
     result = validate_comment_store(records["comments"], records["replies"], policy)
     browser_scan_requests, request_errors = replay_browser_scan_requests(
@@ -69,7 +69,7 @@ def load_state(
     if request_errors:
         result["errors"].extend(request_errors)
         result["valid"] = False
-    result["revision"] = comment_store_revision(root / "data")
+    result["revision"] = revision
     result["counts"] = {
         "comment_events": len(records["comments"]),
         "reply_events": len(records["replies"]),

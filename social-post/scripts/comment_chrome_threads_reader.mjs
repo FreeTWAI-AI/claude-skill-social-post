@@ -77,7 +77,35 @@ export function readThreadsNativeColumn(root, expected) {
   const [focus] = focuses;
   if (!visible(original) || !visible(focus) || original.parentElement !== focus.parentElement
       || original.nextElementSibling !== focus) return null;
-  const parent = nativeAnchor(original, expected.postPath);
+  let parent;
+  let resultAncestorPaths;
+  if (expected.resultAncestorPaths === undefined) {
+    parent = nativeAnchor(original, expected.postPath);
+  } else {
+    const paths = expected.resultAncestorPaths;
+    if (!Array.isArray(paths) || paths.length !== 2 || paths[1] !== expected.postPath
+        || new Set([...paths, expected.targetPath]).size !== 3
+        || paths.some((path) => typeof path !== "string"
+          || !/^\/@[A-Za-z0-9._-]+\/post\/[A-Za-z0-9_-]+$/u.test(path))) return null;
+    const rows = [...original.children];
+    if (rows.length !== paths.length) return null;
+    resultAncestorPaths = [];
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const rowOwner = row.firstElementChild;
+      const owned = [...row.querySelectorAll('[data-pressable-container="true"]')];
+      if (row.tagName !== "DIV" || !visible(row) || row.children.length !== 1
+          || rowOwner?.tagName !== "DIV" || !visible(rowOwner)
+          || rowOwner.getAttribute("data-pressable-container") !== "true"
+          || owned.length !== 1 || owned[0] !== rowOwner) return null;
+      const anchor = nativeAnchor(row, paths[index]);
+      const times = [...row.querySelectorAll("time")];
+      if (!anchor || anchor.link.closest('[data-pressable-container="true"]') !== rowOwner
+          || times.length !== 1 || !visible(times[0]) || !anchor.link.contains(times[0])) return null;
+      resultAncestorPaths.push(anchor.path);
+      parent = anchor;
+    }
+  }
   const target = nativeAnchor(focus, expected.targetPath);
   if (!parent || !target || parent.path === target.path) return null;
   const owner = target.link.closest('[data-pressable-container="true"]');
@@ -125,7 +153,8 @@ export function readThreadsNativeColumn(root, expected) {
   const emptyTail = pagelets.filter((node) => node !== original && node !== focus).every((node) =>
     node.parentElement === focus.parentElement && !node.querySelector('a[href],time,[role="button"],[role="textbox"]')
       && !norm(node.innerText));
-  const zeroReplyCandidate = replyCount === 0 && visible(marker) && norm(marker.innerText) === "尚無回覆"
+  const zeroReplyCandidate = resultAncestorPaths === undefined && replyCount === 0
+    && visible(marker) && norm(marker.innerText) === "尚無回覆"
     && !marker.querySelector('a[href],button,[role="button"]') && emptyTail;
   const parts = [];
   for (let node = owner; node && node !== root; node = node.parentElement) {
@@ -135,7 +164,8 @@ export function readThreadsNativeColumn(root, expected) {
   }
   return { author: authors[0].author, authorDisplay: authors[0].display, body,
     displayedAt: target.displayedAt, parentPath: parent.path, targetPath: target.path,
-    selector: `:scope > ${parts.join(" > ")}`, replyCount, zeroReplyCandidate };
+    selector: `:scope > ${parts.join(" > ")}`, replyCount, zeroReplyCandidate,
+    ...(resultAncestorPaths ? { resultAncestorPaths } : {}) };
 }
 
 async function verifyThreadsAccountAndTitle(tab, native) {
@@ -176,9 +206,13 @@ export async function readThreadsNativeComment(tab, native) {
       || !Number.isSafeInteger(raw.replyCount) || raw.replyCount < 0 || typeof raw.zeroReplyCandidate !== "boolean") {
     fail("Threads native parent context, author, time or whole body is ambiguous");
   }
+  if (native.resultAncestorPaths !== undefined
+      && (JSON.stringify(raw.resultAncestorPaths) !== JSON.stringify(native.resultAncestorPaths)
+        || raw.zeroReplyCandidate !== false)) fail("Threads result ancestor chain differs from its source target");
   const evidence = immutableJsonSnapshot({ author: raw.author, authorDisplay: raw.authorDisplay, body: raw.body,
     displayedAt: raw.displayedAt, parentPath: raw.parentPath, targetPath: raw.targetPath,
     selector: raw.selector, replyCount: raw.replyCount, zeroReplyCandidate: raw.zeroReplyCandidate,
+    ...(native.resultAncestorPaths ? { resultAncestorPaths: raw.resultAncestorPaths } : {}),
   }, "Threads native target evidence");
   if (tab.id !== tabId || trustedUrl("threads", await tab.url()).toString() !== observedUrl) {
     fail("Threads native tab or URL changed during target reading");

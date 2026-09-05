@@ -101,10 +101,12 @@ assert.equal(claimBridgeModule.runPythonRecovery, undefined);
 assert.equal(claimBridgeModule.recoverPythonLedgerReconcile, undefined);
 assert.deepEqual(Object.keys(claimBridgeModule).sort(), [
   "createCommentChromeActuator",
+  "createCommentCuaActuator",
   "createPythonLedgerClaimSubmit",
   "isPythonLedgerClaimSubmit",
 ]);
-assert.deepEqual(Object.keys(actuatorFacadeModule), ["createCommentChromeActuator"]);
+assert.deepEqual(Object.keys(actuatorFacadeModule), ["createCommentChromeActuator", "createCommentCuaActuator"]);
+assert.equal(actuatorFacadeModule.createCommentCuaActuator, claimBridgeModule.createCommentCuaActuator);
 assert.equal(receiptCalls, 0);
 for (const value of [claimSubmit, liveClaimSubmit]) {
   assert.equal(value.recoverReceipt, undefined);
@@ -156,7 +158,7 @@ const bridgeSource = await readFile(new URL("./comment_chrome_claim_bridge.mjs",
 // reply trigger. Selected editor B must remain pinned across fill and claim.
 // This guards source ordering, not physical DOM continuity or a live canary.
 const canaryPrepareStart = bridgeSource.indexOf("async function prepareLiveCanaryReply(");
-const canaryPrepareEnd = bridgeSource.indexOf("async function prepareLiveReply(", canaryPrepareStart);
+const canaryPrepareEnd = bridgeSource.indexOf("\nasync function ", canaryPrepareStart + 1);
 assert.ok(canaryPrepareStart > 0 && canaryPrepareEnd > canaryPrepareStart);
 const canaryPrepareSource = bridgeSource.slice(canaryPrepareStart, canaryPrepareEnd);
 assert.match(canaryPrepareSource, /^\s*await bindLiveSubmitNode\(tab, initialComposer\);\s*$/mu);
@@ -199,7 +201,7 @@ assert.match(canarySubmitSource, /let authorization = await requireLiveReplyPoli
 let previousClaimMarker = -1;
 for (const marker of [
   "const before = await inspectReadyLiveComposer(tab, action, canary);",
-  "const nodeId = await bindLiveSubmitNode(tab, before.submit);",
+  'const nodeId = transport === "legacy_dom_node" ? await bindLiveSubmitNode(tab, before.submit) : null;',
   "await claimSubmit(request)",
   "const afterClaim = await inspectReadyLiveComposer(tab, action, canary);",
   "await bindLiveSubmitNode(tab, afterClaim.submit) !== nodeId",
@@ -220,6 +222,10 @@ for (const marker of [
 assert.equal((canarySubmitSource.match(/liveReplyRecoveryContexts\.set\(/gu) ?? []).length, 1);
 assert.equal((canarySubmitSource.match(/await claimSubmit\(request\)/gu) ?? []).length, 1);
 assert.equal((canarySubmitSource.match(/await tab\.dom_cua\.click\(/gu) ?? []).length, 1);
+assert.equal((canarySubmitSource.match(/await finalSurface\.submit\.click\(/gu) ?? []).length, 1);
+assert.match(canarySubmitSource, /if \(transport === "cua_semantic_selection"\)/u);
+assert.match(canarySubmitSource, /await requireCommentCuaTab\(tab, preparation\.observed_url\)/u);
+assert.match(canaryReadySource, /revalidateThreadsSelection\(tab, action\)\)\.selection_digest !== selected\.selection_digest/u);
 const recoverySourceStart = bridgeSource.indexOf("async function readLiveRecoveryAction(");
 const recoverySourceEnd = bridgeSource.indexOf("export function isPythonLedgerClaimSubmit(", recoverySourceStart);
 assert.ok(recoverySourceStart > 0 && recoverySourceEnd > recoverySourceStart);
@@ -227,7 +233,8 @@ const liveRecoverySource = bridgeSource.slice(recoverySourceStart, recoverySourc
 assert.match(liveRecoverySource, /DEFAULT_SCRIPT, "browser-recovery-action"/u);
 assert.match(liveRecoverySource, /shell: false, windowsHide: true/u);
 assert.match(liveRecoverySource, /preparation\.action_digest !== actionDigest\(action\)/u);
-assert.match(liveRecoverySource, /getSourceOwnedChromeBrowser\(\)/u);
+assert.match(liveRecoverySource, /withSourceOwnedTargetIntakeTab\(liveReplyUrl\(context\.action\), async \(tab\) =>/u);
+assert.doesNotMatch(liveRecoverySource, /createLiveCommentTab\(|\.tabs\.(?:new|get)\(|\.(?:reload|close)\(/u);
 assert.match(liveRecoverySource, /recoverPythonLedgerReconcile\(claimSubmit, request\)/u);
 assert.match(liveRecoverySource, /context\.claimSubmit, "browser-reconcile", receipt/u);
 assert.match(liveRecoverySource, /liveReplyRecoveryContexts\.set\(request\.key, context\)/u);

@@ -37,6 +37,16 @@ def load_comment_records(data_dir: Path) -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def load_comment_snapshot(
+    data_dir: Path,
+) -> tuple[dict[str, list[dict[str, Any]]], str]:
+    """Bind parsed rows and optimistic revision to the same writer-locked view."""
+    with exclusive_store_lock(data_dir):
+        records = load_comment_records(data_dir)
+        revision = comment_store_revision(data_dir)
+    return records, revision
+
+
 def commit_comment_records(
     records: dict[str, list[dict[str, Any]]], *, data_dir: Path, expected_revision: str,
 ) -> str:
@@ -76,4 +86,5 @@ def commit_comment_records(
                     else:
                         destination.write_bytes(original)
                 raise
-    return comment_store_revision(data_dir)
+        # Return the revision of this commit, before another writer can enter.
+        return comment_store_revision(data_dir)

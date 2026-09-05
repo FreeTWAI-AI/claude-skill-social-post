@@ -29,6 +29,8 @@ from comment_test_trusted_host_verifier import run_trusted_host_verifier_tests
 
 
 JS_TEST_MODULES = {
+    "scripts/comment_cua_runtime_test.mjs",
+    "scripts/comment_cua_dispatch_test.mjs",
     "scripts/comment_chrome_actuator_fixture_test.mjs",
     "scripts/comment_chrome_actuator_guards_test.mjs",
     "scripts/comment_chrome_actuator_receipts_test.mjs",
@@ -54,6 +56,7 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_scan_adapters_test.mjs",
     "scripts/comment_chrome_textarea_identity_test.mjs",
     "scripts/comment_chrome_threads_reader_test.mjs",
+    "scripts/comment_chrome_threads_canary_surface_test.mjs",
     "scripts/comment_chrome_threads_icon_identity_test.mjs",
 }
 
@@ -130,6 +133,17 @@ def run_chrome_actuator_tests() -> None:
         subprocess.run([node, str(Path(__file__).with_name(name))], check=True)
     for name, marker, missing_message in (
         (
+            "comment_cua_runtime_test.mjs",
+            "comment CUA runtime ownership tests passed",
+            "CUA runtime ownership child success marker is missing",
+        ),
+        (
+            "comment_cua_dispatch_test.mjs",
+            "PASS CUA durable dispatch orchestration "
+            "(isolated; no browser or canonical ledger)",
+            "CUA durable dispatch child success marker is missing",
+        ),
+        (
             "comment_chrome_runtime_reconnect_test.mjs",
             "PASS source-owned Chrome explicit disconnect reconnection tests (mocked; no browser)",
             "Chrome reconnect child success marker is missing",
@@ -161,6 +175,12 @@ def run_chrome_actuator_tests() -> None:
             "comment_chrome_threads_icon_identity_test.mjs",
             "PASS Threads reply icon stable-node identity tests (anonymous; no browser)",
             "Threads icon identity child success marker is missing",
+        ),
+        (
+            "comment_chrome_threads_canary_surface_test.mjs",
+            "PASS Threads source-selected empty preparation and native DOM readers "
+            "(anonymous; no browser submission)",
+            "Threads canary surface child success marker is missing",
         ),
     ):
         _run_marked_chrome_test(node, name, marker, missing_message)

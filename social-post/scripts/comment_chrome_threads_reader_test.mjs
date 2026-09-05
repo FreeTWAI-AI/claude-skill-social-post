@@ -242,6 +242,34 @@ function testTargetIdentityGuards() {
   ]) assert.throws(() => threadsNativeTarget({ ...target, ...changed }));
 }
 
+function testResultOnlyAncestorChainCannotUpgradeIntake() {
+  const fixture = column();
+  const childNative = threadsNativeTarget({ ...target,
+    post_key: native.commentId, post_permalink: native.commentUrl,
+    platform_comment_id: "OwnReply789",
+    comment_permalink: "https://www.threads.com/@example.owner/post/OwnReply789",
+  });
+  const child = postRow({ path: childNative.targetPath, author: native.account, text: "Approved reply" });
+  fixture.parentPagelet.childNodes = [];
+  fixture.parentPagelet.append(el("div", {}, [fixture.parent.scope]));
+  fixture.parentPagelet.append(el("div", {}, [fixture.focus.scope]));
+  fixture.targetPagelet.childNodes = [];
+  fixture.targetPagelet.append(child.scope);
+  assert.equal(parse(fixture, childNative), null,
+    "the default single-anchor target intake must still reject a nested ancestor chain");
+  const expectedResult = { ...childNative, resultAncestorPaths: [native.postPath, native.targetPath] };
+  const positive = parse(fixture, expectedResult);
+  assert.ok(positive);
+  assert.equal(positive.parentPath, native.targetPath);
+  assert.deepEqual(positive.resultAncestorPaths, [native.postPath, native.targetPath]);
+  assert.equal(positive.zeroReplyCandidate, false,
+    "result-only context support cannot grant even a zero-reply candidate");
+  for (const paths of [[], [native.targetPath], [native.targetPath, native.postPath],
+    [native.postPath, native.postPath], [native.postPath, native.targetPath, childNative.targetPath]]) {
+    assert.equal(parse(fixture, { ...childNative, resultAncestorPaths: paths }), null);
+  }
+}
+
 class Locator {
   constructor(fixture, nodes) { this.fixture = fixture; this.nodes = nodes; }
   filter({ has }) { return new Locator(this.fixture, this.nodes.filter((node) => has.nodes.some((child) => node.contains(child)))); }
@@ -356,6 +384,7 @@ testZeroCandidateCannotClaimCompleteness();
 testBodyAndPendingRejections();
 testParentAuthorAndTimeAnchorRejections();
 testTargetIdentityGuards();
+testResultOnlyAncestorChainCannotUpgradeIntake();
 await testSourceReaderAndUrlDrift();
 await testSourceRejectsAmbiguousOrMissingIdentity();
 assert.ok(parserCalls > 30, "actual native column callback runs across anonymous positive and negative cases");

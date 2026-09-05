@@ -21,6 +21,8 @@ import {
   evaluateModuleRoles,
   evaluateReviewedExternalImports,
   importPolicyFinding,
+  inventoryScopeDirectories,
+  isInventoryPath,
   isReviewedExternalDynamicImport,
   parseStaticModuleSpecifiers,
 } from "./comment_js_architecture_core.mjs";
@@ -228,6 +230,32 @@ function runParserChecks(assertCheck) {
 }
 
 function runManifestAndRoleChecks(assertCheck) {
+  const scoped = EXPECTED_INVENTORY.filter(isInventoryPath);
+  assertCheck("declared-scope-discovers-exact-manifest-including-cua", (
+    scoped.length === EXPECTED_INVENTORY.length
+      && scoped.includes("scripts/comment_cua_runtime.mjs")
+      && scoped.includes("scripts/comment_cua_runtime_test.mjs")
+      && scoped.includes("scripts/comment_cua_dispatch_test.mjs")
+      && evaluateInventoryManifest(scoped).length === 0
+  ));
+  assertCheck("declared-scope-directories-include-exact-fixture-directory", (
+    JSON.stringify(inventoryScopeDirectories())
+      === JSON.stringify(["scripts", "scripts/comment_adapter_fixtures"])
+  ));
+  assertCheck("missing-cua-runtime-rejected-after-scope-selection", evaluateInventoryManifest(
+    scoped.filter((path) => path !== "scripts/comment_cua_runtime.mjs"),
+  ).some((item) => item.code === "closed-inventory-member-missing"
+    && item.paths.includes("scripts/comment_cua_runtime.mjs")));
+  const unreviewedCua = "scripts/comment_cua_unreviewed.mjs";
+  assertCheck("unreviewed-cua-discovered-and-rejected", isInventoryPath(unreviewedCua)
+    && evaluateInventoryManifest([...scoped, unreviewedCua]).some((item) => (
+      item.code === "closed-inventory-member-unreviewed" && item.paths.includes(unreviewedCua)
+    )));
+  assertCheck("inventory-scope-does-not-broaden-to-nested-or-backup-files", [
+    "scripts/nested/comment_cua_runtime.mjs", "scripts/comment_cua_runtime.mjs.bak",
+    "scripts/comment_cua_runtime.py", "private/comment_cua_runtime.mjs",
+    "scripts/../scripts/comment_cua_runtime.mjs", "scripts/comment_adapter_fixtures/extra.js",
+  ].every((path) => !isInventoryPath(path)));
   assertCheck("exact-inventory-manifest-accepted", (
     evaluateInventoryManifest(EXPECTED_INVENTORY).length === 0
   ));

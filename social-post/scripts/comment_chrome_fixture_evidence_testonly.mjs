@@ -147,6 +147,7 @@ async function snapshotCurrentArchitectureInventory() {
   const selected = entries.filter((entry) => (
     entry.name.endsWith(".mjs")
       && (entry.name.startsWith("comment_chrome_")
+        || entry.name.startsWith("comment_cua_")
         || entry.name.startsWith("comment_js_architecture_"))
   ));
   if (selected.some((entry) => !entry.isFile())) {

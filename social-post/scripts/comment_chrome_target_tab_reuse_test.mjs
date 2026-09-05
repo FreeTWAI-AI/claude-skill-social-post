@@ -12,7 +12,9 @@ function between(startText, endText) {
   return source.slice(start, end);
 }
 const helperSource = between("async function requireExactTargetIntakeTab(", "async function observeLiveTargetComment(");
+const runtimeSource = between("async function getLiveCommentBrowser(", "async function requireLiveSubmitTransport(");
 const observeSource = between("async function observeLiveTargetComment(", "export function createCommentChromeActuator(");
+const recoverySource = between("function liveRecoveryRequest(", "export function isPythonLedgerClaimSubmit(");
 const targetUrl = "https://www.facebook.com/story.php?story_fbid=POST_A&id=ACCOUNT_A&comment_id=COMMENT_A";
 const otherUrl = targetUrl.replace("COMMENT_A", "COMMENT_B");
 const fixtures = [];
@@ -41,29 +43,41 @@ function mockTab(id, url) {
 }
 
 function fixture(options = {}) {
-  const current = { existing: mockTab("existing-tab", targetUrl), created: mockTab("created-tab", "about:blank"),
-    calls: { browser: 0, list: 0, get: [], new: 0, bind: 0, inspect: 0, timers: [], authorization: 0 }, ...options };
+  const current = { targetUrl: options.targetUrl ?? targetUrl,
+    existing: mockTab("existing-tab", options.targetUrl ?? targetUrl), created: mockTab("created-tab", "about:blank"),
+    calls: { browser: 0, legacyBrowser: 0, cuaBrowser: 0, cuaChecks: [], list: 0, get: [], new: 0, newArgs: [],
+      bind: 0, inspect: 0, timers: [], authorization: 0 }, ...options };
   current.browser = { tabs: {
     list: async () => {
       current.calls.list += 1;
       if (current.listError) throw current.listError;
       if (typeof current.listing === "function") return current.listing(current.calls.list);
-      return Object.hasOwn(current, "listing") ? current.listing : [{ id: "existing-tab", url: targetUrl }];
+      return Object.hasOwn(current, "listing") ? current.listing : [{ id: "existing-tab", url: current.targetUrl }];
     },
     get: async (id) => {
       current.calls.get.push(id);
       if (current.getError) throw current.getError;
       return current.existing.tab;
     },
-    new: async () => {
+    new: async (url) => {
       current.calls.new += 1;
+      current.calls.newArgs.push(url);
       if (current.newError) throw current.newError;
+      if (current.cua) current.created.href = current.created.gotoUrl ?? url;
       return current.created.tab;
     },
   } };
-  const api = runInNewContext(`${helperSource}\n${observeSource}\n({ withSourceOwnedTargetIntakeTab, observeLiveTargetComment })`, {
+  current.environment = {
     URL, canonicalUrl, fail, immutableJsonSnapshot, requiredString,
-    getSourceOwnedChromeBrowser: async () => { current.calls.browser += 1; return current.browser; },
+    hasCommentCuaRuntime: () => Boolean(current.cua),
+    isCommentCuaTab: (tab) => Boolean(current.cua) && (tab === current.existing.tab || tab === current.created.tab),
+    getCommentCuaBrowser: async () => { current.calls.browser += 1; current.calls.cuaBrowser += 1; return current.browser; },
+    getSourceOwnedChromeBrowser: async () => { current.calls.browser += 1; current.calls.legacyBrowser += 1; return current.browser; },
+    requireCommentCuaTab: async (tab, url) => {
+      current.calls.cuaChecks.push({ id: tab.id, url });
+      const record = tab === current.existing.tab ? current.existing : current.created;
+      if (canonicalUrl(record.href).toString() !== url) fail("CUA target tab URL changed");
+    },
     bindLiveReplyBrowser: (tab, browser) => {
       current.calls.bind += 1;
       assert.equal(browser, current.browser);
@@ -77,9 +91,10 @@ function fixture(options = {}) {
     },
     normalizeScanTarget: () => { throw new Error("unexpected normalization after forbidden caller authority"); },
     runPythonScanRequest: () => { current.calls.authorization += 1; throw new Error("test forbids authorization"); },
-  }, { timeout: 1000 });
+  };
+  const api = runInNewContext(`${runtimeSource}\n${helperSource}\n${observeSource}\n({ withSourceOwnedTargetIntakeTab, observeLiveTargetComment })`, current.environment, { timeout: 1000 });
   current.observeRequest = api.observeLiveTargetComment;
-  current.run = (inspect = async () => ({ observed: "native callback result" }), url = targetUrl) =>
+  current.run = (inspect = async () => ({ observed: "native callback result" }), url = current.targetUrl) =>
     api.withSourceOwnedTargetIntakeTab(url, async (tab) => { current.calls.inspect += 1; return inspect(tab); });
   fixtures.push(current);
   return current;
@@ -234,6 +249,193 @@ async function testCallerCannotProvideTabOrBrowserAuthority() {
   }
 }
 
+async function testCuaCreatesAtExactUrlAndChecksIdentityTwice() {
+  for (const created of [false, true]) {
+    const current = fixture({ cua: true, ...(created ? { listing: [] } : {}) });
+    const record = created ? current.created : current.existing;
+    assert.equal(await current.run(async (tab) => {
+      assert.equal(tab, record.tab);
+      assert.equal(current.calls.cuaChecks.length, 1, "CUA target is checked before native inspection");
+      return "CUA native observation";
+    }), "CUA native observation");
+    assert.equal(current.calls.cuaBrowser, 1);
+    assert.equal(current.calls.legacyBrowser, 0);
+    assert.deepEqual(current.calls.newArgs, created ? [canonicalUrl(targetUrl).toString()] : []);
+    assert.deepEqual(record.calls.goto, [], "CUA tabs.new(url) never causes a second goto");
+    assert.deepEqual(current.calls.cuaChecks, [
+      { id: record.tab.id, url: canonicalUrl(targetUrl).toString() },
+      { id: record.tab.id, url: canonicalUrl(targetUrl).toString() },
+    ], "same exact CUA identity/URL is checked before and after observation");
+    assert.equal(record.calls.close, created ? 1 : 0);
+  }
+  for (const created of [false, true]) {
+    for (const drift of ["id", "url"]) {
+      const current = fixture({ cua: true, ...(created ? { listing: [] } : {}) });
+      const record = created ? current.created : current.existing;
+      await assert.rejects(current.run(async () => {
+        if (drift === "id") record.tab.id = "changed-cua-tab";
+        else record.href = otherUrl;
+      }), /tab (?:identity|URL) changed/u);
+      assert.equal(current.calls.cuaChecks.length, 2);
+      assert.equal(current.calls.inspect, 1);
+      assert.equal(record.calls.close, created ? 1 : 0);
+    }
+  }
+}
+
+function recoveryFixture({ fresh = false, reads = ["positive"], ...options } = {}) {
+  const current = fixture({ cua: true,
+    targetUrl: "https://www.threads.com/@example.reader/post/Comment456", ...options });
+  const state = { observations: 0, waits: 0, rotations: 0, commits: [], writes: [], reads: [...reads] };
+  const action = { action_id: "recovery-action", intent_id: "recovery-intent", session_id: "original-session",
+    scope: { platform: "threads" }, comment_permalink: current.targetUrl,
+    comment_fingerprint: "fingerprint", reply_hash: "reply-hash" };
+  const request = { intentId: action.intent_id, sessionId: "recovery-session" };
+  const key = JSON.stringify([request.intentId, request.sessionId]);
+  const preparation = { preparation_id: "preparation", baseline_total_reply_count: 0 };
+  const attempt = { canary_lease_id: "existing-lease", attempt_session_id: action.session_id,
+    claim_id: "existing-claim", preflight_id: "existing-preflight" };
+  const forbidden = (operation) => async () => { state.writes.push(operation); throw new Error(`recovery forbids ${operation}`); };
+  const claimSubmit = forbidden("claim");
+  const context = { action, preparation, attempt, claimSubmit };
+  const contexts = new Map(fresh ? [] : [[key, context]]), inFlight = new Set();
+  for (const record of [current.existing, current.created]) {
+    for (const name of ["click", "fill", "press", "submit", "reload"]) record.tab[name] = forbidden(name);
+    record.tab.dom_cua = { click: forbidden("dom_cua.click") };
+  }
+  const api = runInNewContext(`${runtimeSource}\n${helperSource}\n${recoverySource}\n({ recoverLiveApprovedReply, reconcileLiveUncertainReply })`, {
+    ...current.environment, Object, JSON, Set, Map,
+    immutableJsonSnapshot: (value, label) => immutableJsonSnapshot(JSON.parse(JSON.stringify(value)), label),
+    liveReplyUrl: (value) => value.comment_permalink,
+    nowIso: () => "2026-09-05T00:00:00.000Z",
+    liveReplyRecoveryContexts: contexts, liveReplyRecoveryInFlight: inFlight,
+    readLiveRecoveryAction: async () => ({ action, preparation, attempt }),
+    createPythonLedgerClaimSubmit: () => claimSubmit,
+    isPythonLedgerClaimSubmit: (value) => value === claimSubmit,
+    waitForNativeParent: async (tab) => {
+      assert.ok(tab === current.existing.tab || tab === current.created.tab);
+      state.waits += 1;
+    },
+    inspectLiveCanaryResult: async (tab) => {
+      state.observations += 1;
+      const record = tab === current.existing.tab ? current.existing : current.created;
+      const read = state.reads.shift() ?? "positive";
+      if (read === "unknown") throw new Error("native parent not verified");
+      if (read === "url-drift") record.href = current.targetUrl.replace("Comment456", "Other789");
+      if (read === "id-drift") tab.id = "changed-tab";
+      return { verifiedNewReply: true, exactOwnCount: 1, ownReplyCount: 1,
+        totalReplies: 1, observedUrl: current.targetUrl };
+    },
+    recoverPythonLedgerReconcile: async (owner) => {
+      assert.equal(owner, claimSubmit);
+      state.rotations += 1;
+      assert.equal(current.calls.cuaChecks.length, 2, "preinspection final ownership check precedes rotation");
+      return { attempt_session_id: action.session_id };
+    },
+    commitPythonLedgerBrowserReceipt: async (owner, operation, receipt) => {
+      assert.equal(owner, claimSubmit);
+      assert.equal(operation, "browser-reconcile");
+      assert.equal(receipt.absence_verified, false, "tab reuse cannot broaden positive-only recovery to absence");
+      assert.equal(current.calls.cuaChecks.length, state.observations * 2,
+        "every complete observation has passed both CUA identity checks before commit");
+      state.commits.push(receipt);
+      return { outcome: "sent", reconcile_required: false };
+    },
+    submitLiveReplyAndFinish: forbidden("submitLiveReplyAndFinish"),
+    prepareLiveReply: forbidden("prepareLiveReply"),
+  }, { timeout: 1000 });
+  return { current, state, contexts, context, inFlight, key,
+    recover: (raw = request) => api.recoverLiveApprovedReply(raw),
+    reconcile: (raw = request) => api.reconcileLiveUncertainReply(raw), request };
+}
+
+function assertRecoveryNeverWrites(test) {
+  assert.deepEqual(test.state.writes, [], "recovery cannot claim, fill, submit, reload, or click");
+  assert.equal(test.inFlight.size, 0);
+  assert.equal(test.current.existing.calls.close, 0);
+  assert.deepEqual(test.current.existing.calls.goto, []);
+}
+
+async function testRecoveryUsesExactSourceOwnedTabAndCommitsAfterChecks() {
+  const active = recoveryFixture();
+  assert.equal((await active.reconcile()).outcome, "sent");
+  assert.deepEqual(active.current.calls.get, ["existing-tab"]);
+  assert.equal(active.current.calls.new, 0);
+  assert.equal(active.state.commits.length, 1);
+  assert.equal(active.state.rotations, 0);
+  assertRecoveryNeverWrites(active);
+
+  const fresh = recoveryFixture({ fresh: true, reads: ["positive", "positive"] });
+  assert.equal((await fresh.recover()).outcome, "sent");
+  assert.deepEqual(fresh.current.calls.get, ["existing-tab", "existing-tab"]);
+  assert.equal(fresh.current.calls.list, 2, "preinspection and postrotation reinspection use fresh source inventories");
+  assert.equal(fresh.current.calls.new, 0);
+  assert.equal(fresh.state.observations, 2);
+  assert.equal(fresh.state.rotations, 1);
+  assert.equal(fresh.state.commits.length, 1);
+  assertRecoveryNeverWrites(fresh);
+
+  const created = recoveryFixture({ listing: [] });
+  assert.equal((await created.reconcile()).outcome, "sent");
+  assert.deepEqual(created.current.calls.get, []);
+  assert.deepEqual(created.current.calls.newArgs, [created.current.targetUrl]);
+  assert.equal(created.current.created.calls.close, 1, "only the new source-owned recovery tab is closed");
+  assert.equal(created.state.commits.length, 1);
+  assertRecoveryNeverWrites(created);
+}
+
+async function testRecoveryAmbiguityAndDriftNeverCommit() {
+  const ambiguous = recoveryFixture({ fresh: true });
+  ambiguous.current.listing = ["existing-tab", "other-tab"].map((id) => ({ id, url: ambiguous.current.targetUrl }));
+  await assert.rejects(ambiguous.recover(), /multiple exact URL tabs/u);
+  assert.equal(ambiguous.state.rotations, 0);
+  assert.equal(ambiguous.state.commits.length, 0);
+  assert.equal(ambiguous.state.observations, 0);
+  assert.equal(ambiguous.current.calls.new, 0);
+  assertRecoveryNeverWrites(ambiguous);
+
+  for (const drift of ["url-drift", "id-drift"]) {
+    for (const stage of ["preinspection", "postrotation", "continuation", "new-tab"]) {
+      const fresh = ["preinspection", "postrotation"].includes(stage);
+      const test = recoveryFixture({ fresh, reads: stage === "postrotation" ? ["positive", drift] : [drift],
+        ...(stage === "new-tab" ? { listing: [] } : {}) });
+      await assert.rejects(fresh ? test.recover() : test.reconcile(), /tab (?:identity|URL) changed/u);
+      assert.equal(test.state.commits.length, 0, "a URL/identity drift cannot escape as a committed receipt");
+      assert.equal(test.state.rotations, stage === "postrotation" ? 1 : 0);
+      assert.equal(test.contexts.has(test.key), stage !== "preinspection",
+        "postrotation and continuation failures retain the private recovery context");
+      if (stage === "new-tab") assert.equal(test.current.created.calls.close, 1);
+      assertRecoveryNeverWrites(test);
+      if (stage === "postrotation") {
+        test.current.existing.href = test.current.targetUrl;
+        test.current.existing.tab.id = "existing-tab";
+        assert.equal((await test.reconcile()).outcome, "sent");
+        assert.equal(test.state.rotations, 1, "fresh continuation never rotates again or resends");
+        assert.equal(test.state.commits.length, 1);
+        assertRecoveryNeverWrites(test);
+      }
+    }
+  }
+
+  const unknown = recoveryFixture({ fresh: true, reads: ["unknown"] });
+  const unresolved = await unknown.recover();
+  assert.equal(unresolved.outcome, "unknown");
+  assert.equal(unresolved.committed, false);
+  assert.equal(Object.hasOwn(unresolved, "absence_verified"), false);
+  assert.equal(unknown.state.rotations, 0);
+  assert.equal(unknown.state.commits.length, 0);
+  assertRecoveryNeverWrites(unknown);
+
+  for (const key of ["tab", "tabId", "browser", "inspect", "reply_text"]) {
+    const injected = recoveryFixture({ fresh: true });
+    await assert.rejects(injected.recover({ ...injected.request, [key]: "caller supplied" }), /accepts only intentId/u);
+    assert.equal(injected.current.calls.browser, 0);
+    assert.equal(injected.state.rotations, 0);
+    assert.equal(injected.state.commits.length, 0);
+    assertRecoveryNeverWrites(injected);
+  }
+}
+
 testSourceOwnershipAndCommitOrdering();
 await testExactExistingTabAndFreshListings();
 await testZeroMatchesCreatesAndOwnsOnlyNewTab();
@@ -242,6 +444,9 @@ await testCanonicalUrlMatchingAndLiveVerification();
 await testIdentityAndUrlDriftBeforeAndAfterRead();
 await testFailuresNeverRetryAndRespectCleanupOwnership();
 await testCallerCannotProvideTabOrBrowserAuthority();
+await testCuaCreatesAtExactUrlAndChecksIdentityTwice();
+await testRecoveryUsesExactSourceOwnedTabAndCommitsAfterChecks();
+await testRecoveryAmbiguityAndDriftNeverCommit();
 for (const current of fixtures) {
   assert.equal(current.existing.calls.close, 0, "borrowed tabs are never closed, including on failure");
   assert.deepEqual(current.existing.calls.goto, [], "borrowed tabs are never navigated or force-reloaded");

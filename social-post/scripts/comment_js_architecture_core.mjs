@@ -14,6 +14,7 @@ import {
   FIXTURE_EVIDENCE_MODULE_CLOSURE,
   FIXTURE_FS_PROMISES_BINDINGS,
   FIXTURE_PUBLIC_FUNCTIONS,
+  INVENTORY_SCOPE,
   REVIEWED_EXTERNAL_DYNAMIC_IMPORTS,
   REVIEWED_EXTERNAL_IMPORTS,
   REQUIRED_EDGES,
@@ -525,6 +526,34 @@ function tarjan(modules, edges) {
 
 export function finding(code, message, paths, details = {}) {
   return { status: "FAIL", code, message, paths: [...paths].sort(), details };
+}
+
+/** Resolve only the declared exact-directory, single-star filename scopes. */
+export function inventoryScopeDirectories() {
+  const directories = INVENTORY_SCOPE.map((pattern) => {
+    const directory = posix.dirname(pattern);
+    if (posix.isAbsolute(pattern) || posix.normalize(pattern) !== pattern
+        || directory.split("/").includes("..") || /[*?\[\]\\]/u.test(directory)
+        || posix.basename(pattern).split("*").length > 2) {
+      throw new Error(`unsupported closed inventory scope: ${pattern}`);
+    }
+    return directory;
+  });
+  return [...new Set(directories)].sort();
+}
+
+/** The same declared scopes drive discovery and its calibration fixtures. */
+export function isInventoryPath(path) {
+  if (typeof path !== "string" || posix.isAbsolute(path)
+      || posix.normalize(path) !== path || path.includes("\\")) return false;
+  return INVENTORY_SCOPE.some((pattern) => {
+    if (posix.dirname(path) !== posix.dirname(pattern)) return false;
+    const name = posix.basename(path);
+    const parts = posix.basename(pattern).split("*");
+    return parts.length === 1 ? name === parts[0]
+      : parts.length === 2 && name.length >= parts[0].length + parts[1].length
+        && name.startsWith(parts[0]) && name.endsWith(parts[1]);
+  });
 }
 
 export function evaluateInventoryManifest(discovered) {

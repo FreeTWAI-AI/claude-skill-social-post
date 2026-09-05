@@ -114,6 +114,106 @@ def _assert_exactly_one_race_commit(
     return successes[0]
 
 
+def _commit_while_other_writer_validates(
+    script: Path, root: Path, command: str, source: Path, intent_id: str,
+) -> list[subprocess.CompletedProcess[str]]:
+    """Pause one real CLI after reading rows; another commits before it resumes."""
+    ready = root / f"{command}-snapshot.ready"
+    release = root / f"{command}-snapshot.release"
+    wrapper = (
+        "import pathlib,runpy,sys,time\n"
+        "script,ready,release,*args=sys.argv[1:]\n"
+        "sys.path.insert(0,str(pathlib.Path(script).parent))\n"
+        "import comment_cli_support as support\n"
+        "original=support.validate_comment_store\n"
+        "paused=False\n"
+        "def pause_once(*args,**kwargs):\n"
+        "  global paused\n"
+        "  if not paused:\n"
+        "    paused=True\n"
+        "    pathlib.Path(ready).write_text('rows-loaded',encoding='utf-8')\n"
+        "    deadline=time.monotonic()+15\n"
+        "    while not pathlib.Path(release).exists():\n"
+        "      if time.monotonic()>=deadline: raise TimeoutError('snapshot race release expired')\n"
+        "      time.sleep(0.005)\n"
+        "  return original(*args,**kwargs)\n"
+        "support.validate_comment_store=pause_once\n"
+        "sys.argv=[script,*args]\n"
+        "runpy.run_path(script,run_name='__main__')\n"
+    )
+    cli = [command, str(source), "--intent-id", intent_id, "--session-id", SESSION_ID,
+           "--write", "--root", str(root)]
+    delayed = subprocess.Popen(
+        [sys.executable, "-c", wrapper, str(script), str(ready), str(release), *cli],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists():
+            if delayed.poll() is not None or time.monotonic() >= deadline:
+                raise AssertionError("receipt writer did not reach its loaded-snapshot barrier")
+            time.sleep(0.005)
+        winner = run_cli(
+            script, root, command, str(source), "--intent-id", intent_id,
+            "--session-id", SESSION_ID, "--write",
+        )
+        release.write_text("committed", encoding="utf-8")
+        stdout, stderr = delayed.communicate(timeout=20)
+        loser = subprocess.CompletedProcess(delayed.args, delayed.returncode, stdout, stderr)
+        return [winner, loser]
+    finally:
+        if delayed.poll() is None:
+            delayed.kill()
+            delayed.communicate(timeout=5)
+
+
+def check_receipt_snapshot_revision_race() -> None:
+    """A stale capability snapshot must not adopt another writer's fresh revision."""
+    with tempfile.TemporaryDirectory(prefix="social-receipt-snapshot-race-") as raw:
+        root = Path(raw)
+        script, adapter, action, claim = approved_browser_send(root, "facebook")
+        adapter.click_submit("verified")
+        state = intent_state(root, action["intent_id"])
+        source = root / "finish-snapshot.json"
+        write_json(source, {
+            "provenance": claim["receipt_capability"],
+            "receipt": result_for(action, adapter, state["attempt"]["browser_preflight_id"]),
+        })
+        before = _snapshot(root)
+        results = _commit_while_other_writer_validates(
+            script, root, "browser-finish", source, action["intent_id"],
+        )
+        _assert_exactly_one_race_commit(results, "finish snapshot/revision")
+        if "comment store changed after validation" not in results[1].stderr:
+            raise AssertionError("stale capability view did not retain its original store revision")
+        after = _snapshot(root)
+        if len(after["data/reply_events.jsonl"].splitlines()) != len(before["data/reply_events.jsonl"].splitlines()) + 1:
+            raise AssertionError("ordered receipt race must append exactly one finish event")
+        for name in ("data/comment_events.jsonl", "data/browser_scan_requests.jsonl"):
+            if after[name] != before[name]:
+                raise AssertionError("ordered receipt race changed an unrelated ledger")
+
+    with tempfile.TemporaryDirectory(prefix="social-reconcile-snapshot-race-") as raw:
+        root = Path(raw)
+        script, action, _finish_capability, capability, base, source = _begin_reconcile_case(root)
+        write_json(source, {"provenance": capability, "receipt": base})
+        before = _snapshot(root)
+        results = _commit_while_other_writer_validates(
+            script, root, "browser-reconcile", source, action["intent_id"],
+        )
+        _assert_exactly_one_race_commit(results, "reconcile snapshot/revision")
+        if "comment store changed after validation" not in results[1].stderr:
+            raise AssertionError("stale reconcile capability adopted another writer's revision")
+        after = _snapshot(root)
+        if len(after["data/reply_events.jsonl"].splitlines()) != len(before["data/reply_events.jsonl"].splitlines()) + 1:
+            raise AssertionError("ordered reconcile race must append exactly one terminal event")
+        if intent_state(root, action["intent_id"])["status"] != "reconciled_not_sent":
+            raise AssertionError("ordered reconcile winner did not close its original attempt")
+        for name in ("data/comment_events.jsonl", "data/browser_scan_requests.jsonl"):
+            if after[name] != before[name]:
+                raise AssertionError("ordered reconcile race changed an unrelated ledger")
+
+
 def _assert_finish_expiry_boundary(
     envelope: dict, state: dict,
 ) -> None:
@@ -375,6 +475,7 @@ def run_browser_receipt_provenance_tests() -> None:
     check_finish_provenance_and_replay()
     check_reconcile_rotation_and_replay()
     check_concurrent_receipt_replay_is_exactly_once()
+    check_receipt_snapshot_revision_race()
 
 
 if __name__ == "__main__":

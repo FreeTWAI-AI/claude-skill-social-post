@@ -7,14 +7,37 @@ import { inspectInstagram } from "./comment_chrome_instagram_surface.mjs";
 import { readLiveTargetComment as readInstagramTargetComment } from "./comment_chrome_instagram_reader.mjs";
 import { readFacebookTargetComment } from "./comment_chrome_facebook_reader.mjs";
 import { readThreadsTargetComment } from "./comment_chrome_threads_reader.mjs";
+import {
+  prepareThreadsCanaryReply, inspectThreadsCanarySurface,
+  revalidateThreadsSelection, inspectThreadsCanaryResult,
+} from "./comment_chrome_threads_canary_surface.mjs";
+import {
+  prepareLiveReplyThread as prepareInstagramThread,
+  inspectLiveCanaryResult as inspectInstagramResult,
+} from "./comment_chrome_instagram_surface.mjs";
 
 export { bindLiveReplyBrowser } from "./comment_chrome_facebook_surface.mjs";
 export { liveReplyUrl } from "./comment_chrome_live_common.mjs";
-export {
-  prepareLiveReplyThread, inspectLiveCanaryResult,
-} from "./comment_chrome_instagram_surface.mjs";
+export { revalidateThreadsSelection };
 
-export const LIVE_REPLY_ADAPTER_VERSION = "2026-08-31.6";
+export async function prepareLiveReplyThread(tab, action) {
+  if (action.scope.platform === "instagram") return prepareInstagramThread(tab, action);
+  if (action.scope.platform === "threads") return prepareThreadsCanaryReply(tab, action);
+  fail("native canary preparation is unavailable for this platform");
+}
+
+export async function inspectLiveCanaryResult(tab, action) {
+  if (action.scope.platform === "instagram") return inspectInstagramResult(tab, action);
+  if (action.scope.platform === "threads") return inspectThreadsCanaryResult(tab, action);
+  fail("native canary result reader is unavailable for this platform");
+}
+
+export async function inspectLiveCanarySurface(tab, action) {
+  if (action.scope.platform === "threads") return inspectThreadsCanarySurface(tab, action);
+  return inspectLiveReplySurface(tab, action, "before");
+}
+
+export const LIVE_REPLY_ADAPTER_VERSION = "2026-09-05.1";
 
 export async function readLiveTargetComment(tab, target) {
   if (target?.platform === "instagram") return readInstagramTargetComment(tab, target);

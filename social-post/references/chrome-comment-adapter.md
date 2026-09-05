@@ -1,6 +1,6 @@
 # Chrome Comment Adapter Protocol
 
-> last_verified: 2026-08-31
+> last_verified: 2026-09-05
 > scope: Codex 透過已登入的 Google Chrome，將可見 FB／IG／Threads 留言與本地 comment ledger 接起來。
 
 這份文件只在 P5 實際掃描或回覆時讀。Chrome 是 UI actuator；`comment_assistant.py` 是 scope、授權與稽核的 source of truth。`scripts/comment_chrome_actuator.mjs` 是薄 facade，scan、versioned platform adapter、read-only host/document contract、send 與 durable claim bridge 分別在 `comment_chrome_scan.mjs`、`comment_chrome_scan_adapters.mjs`、`comment_chrome_host_authority.mjs`、`comment_chrome_send.mjs`、`comment_chrome_claim_bridge.mjs`。兩邊只交換版本化 JSON action／receipt，不讓瀏覽器自己決定回覆內容、授權或重試。
@@ -34,29 +34,39 @@ live Chrome read
 
 Python 不能直接 import Codex 的 Chrome 工具，因此 bridge 不是背景 daemon。使用者啟動 P5 後，由當前 Codex Node session 持有 Chrome tab 與 actuator，逐步交換 JSON。`comment_chrome_claim_bridge.mjs` 以 `spawn` 參數陣列和 stdin 呼叫本機 ledger CLI，`shell:false`，不碰 Cookie、profile 或 Meta API。
 
-掃描與送出有獨立開關：`live_browser_scan_enabled=true` 允許已核准 scope 的來源綁定回填；`live_browser_actuation_enabled=false` 仍關閉泛用 production 送出。首次單則 IG 驗證另有 canonical canary lease：綁定當前 session、已核准 action、reply hash、exact scope 與 source digest，最長 300 秒、只可消耗一次；不修改 production policy 或 capability projection。claim 失敗必須在 click 前停止，測試通過或 lease 存在都不代表真實送出成功。
+掃描與送出有獨立開關：`live_browser_scan_enabled=true` 允許已核准 scope 的來源綁定回填；`live_browser_actuation_enabled=false` 仍關閉泛用 production 送出。獨立 canonical canary lease 綁定當前 session、已核准 action、reply hash、exact scope 與 source digest，最長 300 秒、只可消耗一次；不修改 production policy 或 capability projection。當前 CUA 送出只接 Threads 單則候選，IG 的一次送出／對帳屬舊 SDK 歷史實證。claim 失敗必須在 click 前停止，測試通過或 lease 存在都不代表真實送出成功。
 
 ## 當前實作狀態（不是完成宣告）
+
+目前 CUA 工具不暴露舊 `dom_cua` 或 Node REPL browser factory；新路徑依
+`chrome-comment-runtime.md` 一次性 bootstrap，沿用本 bridge 的 ledger／claim／對帳。
+Threads 已加入 source-selected 空 modal preparation 與 native own-child 正向 reader；
+2026-09-05 已實際送出一次並取得原生 own-child 正向觀測；canonical ledger 尚為
+`needs_reconcile`。exact-tab recovery 來源修正已通過 focused tests，但當前 Chrome 控制連線
+在原生檢查前回報 `Debugger unattached`；未新增 recovery／rotation 事件。真實唯讀結算
+仍待連線恢復，不重送，也不能先宣稱 `reconciled_sent` 或已完成 live exact-tab recovery。
+CUA 採 fresh 語義 selection
+與單次 locator click，不冒充舊 fixture 的持久 node ID 契約；此差異不解鎖泛用能力。
 
 Native target 目前 IG、Facebook、Threads 均已完成真實指定留言回填。Facebook 已透過來源持有的 exact-tab reuse 雙讀帳號與完整本文，完成 canonical target-only observation；Threads 以原生 context pagelet 核對父貼文與焦點留言，不再以任意列順序代替層級。指定留言回填不代表送出／整串完整性已驗證。
 
 - `scanAndCommit(tab, target, locatorPlan, options)`：來源綁定的 Chrome 掃描與私有帳本回填；正式模式由受信任 host 取得證據，不接受 caller 自行捏造的 receipt。參數型態以 bridge 實作為準。
 - `observeTargetComment({ platform, account_key, post_key, post_permalink, platform_comment_id, comment_permalink, session_id, ttl_minutes? })`：fused 只讀入口，具備 IG／Facebook／Threads 原生 reader。先建立 target-only request，再於來源持有的 tab 雙讀完整作者／本文／原生 anchor，以私有 bearer 回填 canonical observation；不接收 caller 的 tab、body、author、receipt 或 resolver。各平台的實證範圍依本節分開記錄。
-- `executeCanaryReply({ intentId, sessionId, leaseId })`：限單則 IG 入口。只接受已核准 action 與有效 lease，重新核對正數回覆展開、零既有 own reply、原生父留言選擇及單行核准文字；durable claim 後最多點擊一次，再讀取正確父層的新 native child。無 lease、自訂 callback、source drift、過期或證據不足皆停止。2026-08-31 已完成一次真實單次送出；即時回讀不足時先記 `needs_reconcile`，之後經新 session 的唯讀 recovery 查證原生子回覆並結算 `sent`，全程未重送。這是單一案例，不是三平台／批次驗證。
+- `executeCanaryReply({ intentId, sessionId, leaseId })`：限已核准 action 與有效 lease 的單則入口。當前 CUA Threads 路徑核對原生 explicit-zero marker、兩次穩定讀取、來源點選空 modal、actor 及完整核准文字；durable claim 後最多點擊一次，再查證正確父層的新 native own child。無 lease、自訂 callback、source drift、過期或證據不足皆停止。舊 SDK 的 IG 路徑使用正數回覆展開、零既有 own reply 與原生 mention selection；2026-08-31 已送出一次，未知後經新 session 唯讀 recovery 結算 `sent`，全程未重送。IG 歷史案例不代表當前 CUA 支援 IG，Threads 當輪進度以上述未結算狀態為準；兩者均非三平台／批次驗證。
 - `executeApprovedReply({ intentId, sessionId })`：新增候選 fused 路徑。只讀取本機已核准 action，私有 tab 驗證原留言、編輯器、完整本文與穩定節點，durable claim 後最多點擊一次，再由私有 bridge 提交結果。預設開關仍關閉。
-- `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 claim、不 submit。新的唯讀 `browser-recovery-action` 會核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。同程序 unknown 保留私有原 attempt 與輪替 capability；真正重啟後用不同 recovery session 接回，不能偽稱重啟。已消耗 canary 即使 lease 到期仍可唯讀結算，不會重新取得送出權。
-- Threads 已完成指定樣本的帳號、原貼文、原留言、完整本文與私人帳本雙讀回填。reader 要求同一原生 context 容器內相鄰的 `threads_post_page_0`／`threads_post_page_1`、各自唯一的原生時間連結、精確焦點網址與標題連結；截斷、載入中、錯作者／父層一律拒絕。焦點容器的「尚無回覆」只輸出 `zeroReplyCandidate`，不升級 complete／absence。回覆 dialog 已唯讀核對，尚無本版真實送出／結果回讀 canary。
+- `recoverApprovedReply({ intentId, sessionId, reason? })`／`reconcileUncertainReply({ intentId, sessionId })`：只重新查看，不 fill、不 submit claim、不 submit。唯讀 `browser-recovery-action` 核對原 attempt／action digest／scope，不能把 uncertain 變回 approved。同程序 unknown 保留私有原 attempt 與現有 capability；只有合法 receipt commit 或明確 recovery 才輪替 authority。正向 reader 未能建立 receipt context 時回傳 `committed:false`、`reconcile_required:true`，不提交偽造 flags／零數量 receipt。真正重啟後用不同 recovery session 接回，不能偽稱重啟。已消耗 canary 即使 lease 到期仍可唯讀結算，不會重新取得送出權。
+- Threads 已完成指定樣本的帳號、原貼文、原留言、完整本文與私人帳本雙讀回填。reader 綁定原生 context、精確焦點網址、標題及時間連結；子回覆頁可能有多層 ancestor，必須核對原留言是 immediate parent，不能用任意列順序替代。截斷、載入中、錯作者／父層一律拒絕。原生「尚無回覆」與窄化 terminal reader 只提供單則 canary baseline，不升級泛用 complete／absence。當前 CUA 已送出一次並取得 own-child 正向觀測；帳本尚為 `needs_reconcile`，不允許再送一次來補證據。
 - FB 已於 2026-08-31 經 `observeTargetComment` 完成指定原生留言的來源綁定回填：重用唯一 exact permalink tab，不 reload、不關閉，雙讀登入帳號、作者與完整本文，再提交 canonical target-only observation。正式 reader 已接入 `comment_chrome_facebook_child_reader.mjs`，並在同一授權貼文的既有自己回覆通過唯讀實測：精確核對原生父／子 ID、作者、完整本文及表情符號；不是本輪新送出的留言。原生 tracking query 與可見 mention wrapper 有窄化解析，但缺隱藏文字、錯父／作者、URL 漂移仍拒絕。回傳永遠明示 `complete=false`、`absence_verified=false`；未找到不代表不存在，正向讀取也不鑄造 receipt／送出權。完整展開與 composer actor 尚未驗證，`whole_post_complete=false`、`reply_thread_complete=false`，尚無 FB 真實送出。story／permalink query 解析保留並核對 `story_fbid`＋`id`，不能因未解析出留言就宣稱完整零結果。
 - IG 已在使用者指定樣本完成 native comment page 的 account／parent／whole-body／child-permalink／composer 只讀正反驗證。`p/reel/reels/tv` 僅在同 host、shortcode 與 query 時視為同貼文；原生留言 `/p/S/c/P/` 與子回覆 `/p/S/c/P/r/R/` 分別綁定層級。未展開的回覆不能當零；shared textarea 的 `@author` 自動帶入不能單獨證明選中了正確父留言。泛用 surface 仍 `complete=false`；單則驗證只可走獨立 canary 入口，不能推導 absence 或整篇掃描完成。
-- native canary 先確認尚未選取的 editor 為空；點選指定父留言後，原生 `@author ` 前綴必須與核准 reply 完全相容並保留。preflight 如實記為 `composer_empty_before_fill=false`、`composer_initial_state=native_target_mention`，另綁來源持有的 selection evidence，不偽稱原生帶入後仍是空框。Chrome proxy 沒有可用的實體 document epoch；`document_binding.kind=source_owned_ui_continuity` 只綁來源 tab、exact URL、帳號與完整作者／本文摘要，不保證同 URL reload 偵測，也不升級完整 lifecycle／absence authority。
+- 舊 SDK IG native canary 先確認尚未選取的 editor 為空；點選指定父留言後，原生 `@author ` 前綴必須與核准 reply 完全相容並保留。preflight 如實記為 `composer_empty_before_fill=false`、`composer_initial_state=native_target_mention`，另綁來源持有的 selection evidence，不偽稱原生帶入後仍是空框。當前 CUA Threads 使用來源點選的真正空 modal，核對 Lexical 空結構後才填入，記為 `composer_empty_before_fill=true`。`document_binding.kind=source_owned_ui_continuity` 只綁來源 tab、exact URL、帳號與完整作者／本文摘要，不保證同 URL reload 偵測、實體 document epoch 或持久 node identity，也不升級完整 lifecycle／absence authority。
 - IG Reel 畫面可能同時顯示 Facebook 留言數；分平台只認該平台原生留言 anchor，不以合併總數或已載入 viewport 當完整掃描。不同語言依原文草擬；索取集數、語言版或連結都需人工確認，不自動承諾未存在的內容。
 - 不用未指定貼文、動態牆、私訊或整頁私人截圖補齊缺證據。缺少指定樣本或公開測試授權時停止 live 驗證，報告具體缺口；不要重跑同一批 tests 當成進度。
 
-以下分離式 `prepareReply`／`submitOnce` 舊介面仍是 fixture／未來契約；不得把它與上方候選 fused 入口混為一談。canary 的正向確認只認原有 native reply rows 未變，且正確父留言下恰新增一則核准文字的 own-account child；timeout、看不到新 child、內容／層級不符皆保留 unknown／`needs_reconcile`，停止且不再 click。候選入口與單則結果都不能自行升級公開 capability projection。
+以下分離式 `prepareReply`／`submitOnce` 舊介面仍是 fixture／未來契約；不得把它與上方候選 fused 入口混為一談。canary 正向確認必須查證正確 immediate parent、own account 與完整核准文字，且原生總回覆數至少為原基線＋1；IG 路徑另核對原有 reply rows。CUA Threads 會開啟當下觀測到的 own-child permalink 並核對其原生父層，再返回原留言重新查證。timeout、看不到新 child、內容／層級不符皆保留 unknown／`needs_reconcile`，停止且不再 click。候選入口與單則結果都不能自行升級公開 capability projection。
 
 ## 可執行 actuator
 
-在持有 Browser／Chrome `tab` 的 persistent Node session 動態 import：
+當前 CUA 依 [runtime bootstrap](chrome-comment-runtime.md#當前-cua-工具路徑) 呼叫 `createCommentCuaActuator(cua, { browserId })`，只使用回傳的 fused actuator，不向 operation 傳入 tab／receipt／resolver。以下示例只說明 legacy／fixture 分離式介面，不是當前 CUA 的啟動方式：
 
 ```js
 const { createCommentChromeActuator } = await import(
@@ -86,8 +96,9 @@ const actuator = createCommentChromeActuator({
 ```
 
 同一個 branded `claimSubmit` 只負責 durable claim；它不公開 `finishReceipt`、
-`reconcileReceipt` 或任何接受 raw receipt 的 commit method。正式收據只能由 actuator
-閉包中的 `inspectAndFinish()`／`reinspectAndReconcile()` 在 fresh DOM 檢查後立即提交。
+`reconcileReceipt` 或任何接受 raw receipt 的 commit method。當前 fused 入口的正式收據
+只能由 bridge 私有流程在 fresh DOM 檢查後提交；以下分離式
+`inspectAndFinish()`／`reinspectAndReconcile()` 仍是 fixture／未來契約。
 nonce 只留在 Node 記憶體，並以 `spawn(argv, {shell:false})` 透過 stdin 傳給 Python。
 不要把 capability、nonce 或完整 provenance envelope 寫到檔案、文件、console 或
 canonical ledger。
@@ -105,8 +116,9 @@ canonical ledger。
 `inspectResult()`／`reinspect()` 只保留 `testOnly:true` fixture 診斷；live 呼叫會 fail closed。
 直接 import `createSendOperations()` 即使能產生 frozen receipt，也沒有任何公開 commit
 surface；自訂 runner、root 或 scriptPath 的 bridge 也不能使用 fused live commit。目前正式
-policy 仍 default-off，production adapter 尚未有 authenticated canary，因此正式路徑維持
-fail closed。actuator 不分類風險、不產生回覆、不建立 permit，也不能把不確定結果改成 sent；
+policy 仍 default-off，泛用 production adapter 未完成對應 host／exhaustion／live locator
+promotion，分離式正式路徑維持 fail closed；獨立單則 fused canary 不解鎖它。
+actuator 不分類風險、不產生回覆、不建立 permit，也不能把不確定結果改成 sent；
 候選 fused 入口只提交自己剛取得的 fresh evidence，不向 caller 開放 raw receipt commit。
 
 ## 連線與 tab
@@ -115,12 +127,12 @@ P5 建立或恢復 Chrome 連線、取得 tab，或辨識 Threads icon-only 控�
 
 ## 畫面定位原則
 
-- 先讀 `tab.playwright.domSnapshot()` 或 live accessibility state，再建立當下 locator。
+- 先讀當前工具文件化的 accessibility state（CUA 為 `tab.getAXState()`）或相應已支援的 DOM snapshot，再建立當下 locator；不假設舊 `domSnapshot()` 存在。
 - body、作者、回覆按鈕與父層級必須在同一個可見留言容器內核對。
 - 先用 comment permalink／平台 comment ID；沒有強 anchor 時可用作者＋完整本文，但只能得到 weak identity。
 - locator 必須唯一、可見、enabled。count 不是 1 就停止，不猜第一個。
 - 不保存長期 CSS selector；Meta A/B 或介面改版時重新讀當下 DOM。
-- 不用 JavaScript 修改可見 DOM 來製造成功證據；evaluate 原則上只做 inspection。reply exhaustion control 例外只可在既有 Element 上安裝不可列舉、不可改寫的隨機 node-binding expando，不能改文字、屬性、層級或可見性；同外觀、同 stable instance attribute 的替換節點拿不到該 binding，因此 click 前 fail closed、零點擊。
+- 不用 JavaScript 修改 DOM 來製造成功證據；當前 CUA evaluate 只做 inspection，不安裝 expando。舊 SDK／隔離 fixture 的 reply-exhaustion expando 契約只適用其已文件化且受測的節點路徑，不能帶入 CUA 或用來宣稱持久節點保證。
 
 送出端 locator plan 每個 spec 至少包含 `selector`，可加 `within: "page" | "target" | "reply"`、`attribute`、`valueProperty` 或 `self`。`expected` 一律禁止；預期值只能來自核准 action。target anchor、作者、本文、reply trigger、composer、submit 與 reply items 都必須收斂在同一 target；reply author/body 再收斂到單一 reply item。
 
@@ -135,6 +147,8 @@ P5 建立或恢復 Chrome 連線、取得 tab，或辨識 Threads icon-only 控�
 - localhost controlled fixture 已移到獨立 `comment_chrome_scan_fixture_testonly.mjs`，由 `createTrustedFixtureScanPlan()`＋`createTrustedFixtureScanPost()` 產生；production import graph 不匯入 fixture factory。fixture 只允許 `testOnly:true`＋loopback，不能取得 live brand、不能寫入 active live ledger。raw test plan 只能測 partial locator 行為。
 
 adapter 版本只是受控 DOM contract，不代表 Meta UI 永遠不變。fixture registry 與 production registry 位於不同模組，fixture 的 `[data-fb-*]／[data-ig-*]／[data-threads-*]` selector 永遠不能提升為 live。**目前三平台 production registry 均為 `unavailable_pending_authenticated_canary_and_live_locator_revision`**；read-only contract probe 的存在不會改變這個狀態。每次取得真實 selector 或更新 UI revision都要換版本，重跑 host negatives、exhaustion regression、三平台 fixture 與已登入 read-only canary；完成前維持 `live_browser_actuation_enabled=false`。
+
+模組化維護邊界：UI 改版只調整授權範圍的平台 reader／selection／result 模組及相應回歸測試，沿用共用 ledger、permit、一次性 claim 與 receipt 契約。若是權限拒絕、登入挑戰、CAPTCHA、checkpoint 或平台限制，必須暫停；不能把它當成 selector 問題，以換 URL、runtime、帳號或重試繞過，也不承諾不中斷／24 小時運作。
 
 ## 1. Browser scan
 
@@ -215,7 +229,7 @@ python scripts/comment_assistant.py browser-scan <scan.json> `
   --scan-request-id <request-id> --session-id <current-session> --write
 ```
 
-live P5 不用 raw `ingest`；`browser-scan` 會以 append-only request 驗證 session、期限、登入狀態、平台 host、帳號／貼文 scope、每則留言 observed parent、scan 上限與 comment boolean，並追加可證明零結果的 completion event。若提供 comment permalink，其 path 必須是核准貼文 path 本身或子路徑，並保留貼文 query；它仍須和已核對的 parent post 一起出現。
+live P5 不用 raw `ingest`；`browser-scan` 會以 append-only request 驗證 session、期限、登入狀態、平台 host、帳號／貼文 scope、每則留言 observed parent、scan 上限與 comment boolean，並追加可證明零結果的 completion event。comment permalink 必須符合該平台的原生 anchor 契約並綁定已核對的 parent post；Threads 原留言／子回覆可有獨立 post path，不能用任意同站網址或僅靠 path 前綴推定父層。
 
 ## 2. 取得 immutable action
 
@@ -238,7 +252,7 @@ python scripts/comment_assistant.py browser-action `
 - reply control 唯一、可見、enabled。
 - composer 原本為空。
 
-trusted-host integration 完成後，`prepareReply()` 才會先確認 composer 為空，再用 locator `fill()` 輸入單行 reply，以 read-only element value 重新讀回並確認與 action 的文字完全相同；不要把 Enter 當成換行。現在 live 呼叫在任何 DOM inspection／expansion／click／fill 之前固定拒絕，以下只是 future receipt contract：
+泛用 trusted-host integration 完成後，分離式 `prepareReply()` 才會先確認 composer 為空，再用 locator `fill()` 輸入單行 reply，以 read-only element value 重新讀回並確認與 action 的文字完全相同；不要把 Enter 當成換行。此分離式 live 呼叫在任何 DOM inspection／expansion／click／fill 之前固定拒絕；下文是 future receipt contract，不限制上方獨立 CUA Threads canary 的已實作 preparation。
 
 在碰 reply trigger 以前，送出 plan 還必須提供 `replyExhaustion` schema version 1：target-scoped state 要同時給 cursor、monotonic discovered count 與 explicit terminal；非 terminal page 必須有唯一、受綁定的 viewport traversal control，所有 reply expander 也要有 stable instance 與 same-node binding。只有 terminal stable 雙讀、expander／traversal 都歸零，且 terminal discovered count 等於仍可逐筆檢查的 reply collection，baseline 才成立。`0` 個 reply item 或 `0` 個 expander 本身不是 absence／complete 證據；沒有 terminal cursor、沒有 traversal、count 倒退、virtualization 只留下後頁，或 lazy page 後來才出現 exact own reply，都在點 reply trigger 前停止。
 
@@ -287,6 +301,8 @@ python scripts/comment_assistant.py browser-begin <preflight.json> `
 
 ## 4. Exactly one submit
 
+以下分離式 `submitOnce`／stable-node 規則屬 legacy／fixture 與未啟用的泛用契約；當前 CUA Threads fused 入口按本節末尾的 semantic selection 路徑執行。這些平台 UI 說明不授權使用目前未支援的 FB／IG 送出方式。
+
 - Facebook：Enter 可能直接送出；只在 `browser-begin` 成功後按一次。
 - Instagram：使用當下唯一可辨識的 Post／發布控制或單次 Enter。
 - Threads：reply 本身是一則 thread；確認父 thread 後只送一次。
@@ -294,11 +310,11 @@ python scripts/comment_assistant.py browser-begin <preflight.json> `
 - `submitOnce()` 在 durable `claimSubmit` 前建立 process-wide reservation；同程序併發、重建 actuator，以及跨程序重播都必須被 in-process reservation 或 ledger 狀態拒絕。claim callback timeout／error 可能發生在 ledger commit 前或後，無法證明時 reservation 必須保留。
 - `submitOnce()` 會在消耗 durable claim 前再次執行整份 reply exhaustion contract，並確認 composer 仍完全等於 immutable action。此時沒有 terminal coverage、出現遲到 expander／page，或 later page 找到 exact own reply，都必須是 claim 次數 0、submit click 次數 0；claim 後仍再做一次相同檢查處理 TOCTOU。
 - durable claim 已成功、但可證明 `stableSurface.click()` 尚未被呼叫的 DOM／composer／action／plan 漂移，只回報 pre-click failure並可釋放 process reservation；ledger claim 仍是權威狀態，不能重新 claim 或自動重送。只要 click 已被呼叫，包含 stale、timeout、navigation、disconnect 或任何 exception，都視為可能已寫入 UI，reservation 必須維持到 fresh reconciliation。
-- `comment_chrome_send.mjs` 不反向 import claim bridge。read-only host/document contract 已存在，但 genuine Chrome provenance、authenticated canary 與 stable frame/node mapping 尚未完成；public low-level factory 不接受 caller verifier，也不公開 stable-backend mint。即使傳入 fake tab、fake verifier 或 fake backend，live prepare／submit／finish／reconcile 都必須分別在 DOM mutation、claim、click 與 receipt commit 前 fail closed。
+- `comment_chrome_send.mjs` 不反向 import claim bridge。泛用 stable-node 路徑的 host/document contract 已存在，但對應 authenticated canary 與 stable frame/node mapping 尚未完成；public low-level factory 不接受 caller verifier，也不公開 stable-backend mint。即使傳入 fake tab、fake verifier 或 fake backend，該分離式 live prepare／submit／finish／reconcile 都必須分別在 DOM mutation、claim、click 與 receipt commit 前 fail closed；不得把 CUA 單則實證當成這份泛用契約已完成。
 
-送出不能使用已驗證後才呼叫的 lazy locator `click()`：selector 可能在 ownership 核對與 click 之間重新解析到替代節點。隔離 fixture actuator 使用 Browser `dom_cua` stable-node surface：從不可變 visible-DOM snapshot 取得全頁唯一的精確 submit identity 與字串 `node_id`，在兩輪 URL／target／parent ownership／composer／action digest／plan digest 核對之間重取 snapshot，三次都必須是同一個 `node_id`，最後只呼叫一次 `dom_cua.click({node_id})`。替換節點即使有完全相同的文字與 attributes，也會得到不同 ID；舊節點 detached 時 click 會 stale-fail，禁止 fallback 到 locator 或 retry。surface 缺失時必須在 durable claim 前 fail closed。正式 live stable-node authority 必須等 authenticated trusted-host resolver 實作後由 production 閉包持有；目前不提供 public mint，policy 仍 default-off，live actuator 固定 unavailable。
+legacy／隔離 fixture 的 stable-node 路徑不能把其最後一步換成 lazy locator `click()`：selector 可能重新解析到替代節點。該路徑使用 Browser `dom_cua` stable-node surface：從不可變 visible-DOM snapshot 取得全頁唯一的精確 submit identity 與字串 `node_id`，三次核對均須同一 ID，最後只呼叫一次 `dom_cua.click({node_id})`。舊節點 detached 時 stale-fail，禁止 fallback 或 retry；surface 缺失在 durable claim 前拒絕。泛用 live stable-node authority 尚未完成、也無 public mint；這不是當前 CUA Threads 的 transport，不能要求 CUA 使用不存在的 `dom_cua`。
 
-這是 stable same-node binding，不宣稱瀏覽器層完全原子。Playwright-compatible `locator.evaluate()` 沒有 exposed ElementHandle／backend-node guarded click；除前述不影響畫面的 private expando binding 外，不得改 DOM。`dom_cua` 會在 click 前用同一 element reference 檢查 `isConnected`，但取得座標後到派送 mouse event 仍有極小 TOCTOU：同一節點可能被搬動，或新節點可能佔用原座標。因此 live enable 仍需 canary，且每次單次 click 後一律依下節的 exact parent reconciliation 判定結果，不能僅憑 click return 視為 sent。
+legacy stable same-node binding 也不宣稱瀏覽器層完全原子：節點檢查後至 mouse event 仍有競態。當前 CUA Threads 則誠實採用較窄的 semantic UI continuity：最後 lease I/O 後重新核對來源 tab、exact parent、actor、modal、完整核准文字與唯一 enabled submit，再呼叫一次文件化 `locator.click()`。不安裝 expando、不宣稱 persistent node identity 或原子交易；未知／timeout 不 retry，process reservation 不釋放。click 回傳不是成功證據，必須依原生 own-child／immediate-parent 查證及有效 receipt 結算。
 
 ## 5. Post-submit receipt
 
@@ -365,7 +381,7 @@ live P5 不用 raw `finish-send --evidence`。raw `begin-send`／`finish-send` �
 - 找到 own-account exact reply，而且目前總回覆數至少為「送出前基線＋1」：`browser-reconcile` 才能寫入 `reconciled_sent`。
 - 完整展開且明確確認不存在：只有完全沒有任何 own-author reply，而且目前總回覆數沒有低於送出前基線時，`browser-reconcile` 才能寫入 `reconciled_not_sent`，之後才可重新草擬／核准取得新 permit。若存在 own-author 但文字被平台正規化或與核准文字不完全相同，或目前可見總數低於基線，仍保持不確定，禁止重送。
 - `reinspect()`／recovery 也必須重新取得同一份 versioned terminal exhaustion authority；初始空畫面、兩次空 read、無 terminal cursor／traversal、terminal count 與可檢查 collection 不相等時，連可提交的 absence receipt 都不鑄造，recovery 維持 blocked／unknown，不能推導 `reconciled_not_sent`。
-- 仍不確定：`browser-reconcile` 追加 `browser_reinspection_observed` 稽核事件，消耗舊 capability、輪替新的 reconcile capability，狀態仍為 `needs_reconcile` 且不得重送。這讓每一份 fresh reinspection 都是一次性，不會反覆重播同一張收據。
+- 已核對四項 context flags、但回覆證據仍不確定且符合分類契約：`browser-reconcile` 才追加 `browser_reinspection_observed` 稽核事件，消耗舊 capability、輪替新 capability，狀態仍為 `needs_reconcile` 且不得重送。正向 canary reader 未能建立 context 時不製造 receipt，改回傳 `committed:false`、`reconcile_required:true`，保留既有 attempt／capability、不追加帳本事件；fresh recovery 的前置觀測 unresolved 時也不輪替 authority。禁止捏造 context flags 或以零數量冒充 absence。
 
 完整欄位示例見 [Reinspection JSON example](chrome-comment-validation.md#reinspection-json-example)。
 
