@@ -6,6 +6,7 @@ import {
   inspectThreadsCanarySurface, prepareThreadsCanaryReply, revalidateThreadsSelection, inspectThreadsCanaryResult,
 } from "./comment_chrome_threads_canary_surface.mjs";
 import { readThreadsSelectedDialog } from "./comment_chrome_threads_modal_reader.mjs";
+import { getCommentCuaBrowser, installCommentCuaRuntime } from "./comment_cua_runtime.mjs";
 
 assert.equal(reexportedSelectedDialog, readThreadsSelectedDialog, "production surface preserves the independently importable pure callback");
 
@@ -696,6 +697,131 @@ async function testPositiveChildReadback() {
     "URL drift during the final candidate read must not return success");
 }
 
+async function testCuaChildUsesNewOwnedTabWithoutParentNavigation() {
+  let active;
+  let sequence = 0;
+  const browserId = "anonymous-cua-browser";
+  const cua = {
+    async getState() {
+      active.stateReads += 1;
+      return { browsers: [{ id: browserId, family: "chrome", type: "extension",
+        metadata: { extensionInstanceId: active.extension ?? "anonymous-cua-extension" },
+        tabs: [
+          { id: active.parent.tab.id, url: active.parent.url },
+          { id: `existing-child-${sequence}`, url: active.parent.childUrl },
+          ...(active.child && !active.child.closed ? [{ id: active.child.tab.id, url: active.child.url }] : []),
+        ],
+      }] };
+    },
+    async getTab(id, options) {
+      active.gets.push(id);
+      assert.equal(options.browser, browserId);
+      assert.equal(id, active.parent.tab.id, "result inspection cannot borrow an already listed child");
+      return active.parent.tab;
+    },
+    async createBrowserTab(browser, url, options) {
+      active.creates.push(url);
+      assert.equal(browser, "chrome");
+      assert.equal(url, active.parent.childUrl, "only the exact own-child link discovered in native DOM may be opened");
+      assert.equal(options.sessionName, "💬 Social Post");
+      if (active.creationError) throw active.creationError;
+      const parent = active.parent;
+      const child = { ...parent, url, scene: "child", document: parent.childDocument,
+        waits: [], callbacks: [], closed: false, closes: 0,
+        onEvaluate: (name, state) => active.onChildEvaluate?.(name, state) };
+      child.tab = { id: `created-child-${sequence}`, url: async () => child.url,
+        playwright: new Locator(child, [child.document]),
+        goto: async () => { active.forbidden.push("child goto"); throw new Error("CUA result never navigates child"); },
+        close: async () => { child.closes += 1; child.closed = true; },
+      };
+      active.child = child;
+      return child.tab;
+    },
+  };
+  function nextCase() {
+    sequence += 1;
+    const parent = resultFixture();
+    parent.tab.id = `cua-parent-${sequence}`;
+    const test = { parent, child: null, gets: [], creates: [], stateReads: 0, forbidden: [] };
+    parent.tab.goto = async () => { test.forbidden.push("parent goto"); throw new Error("CUA result must preserve parent navigation"); };
+    parent.tab.close = async () => { test.forbidden.push("parent close"); throw new Error("CUA result cannot close parent"); };
+    active = test;
+    return test;
+  }
+  async function inspect(test) {
+    active = test;
+    const parent = await getCommentCuaBrowser().tabs.get(test.parent.tab.id);
+    return inspectThreadsCanaryResult(parent, action);
+  }
+  function assertReadOnlyLifecycle(test, created = true) {
+    assert.deepEqual(test.forbidden, []);
+    assert.deepEqual(test.gets, [test.parent.tab.id], "no get/reclaim on an existing child tab");
+    assert.equal(test.creates.length, created ? 1 : 0, "no creation or navigation retries");
+    assert.equal(test.parent.clicks, 0);
+    assert.deepEqual(test.parent.navigations, []);
+    if (test.child) {
+      assert.equal(test.child.closes, 1, "close only the one owned child tab, including on failed proof");
+      assert.equal(test.child.clicks, 0);
+    }
+  }
+  const positive = nextCase();
+  await installCommentCuaRuntime(cua, { browserId });
+  const observed = await inspect(positive);
+  assert.equal(observed.verifiedNewReply, true);
+  assert.equal(observed.replyPermalink, positive.parent.childUrl);
+  assert.equal(observed.observedUrl, expected.commentUrl);
+  assert.equal(observed.complete, false);
+  assert.equal(observed.absence_verified, false);
+  assert.ok(positive.stateReads >= 12, "fresh browser ownership surrounds both original-parent and child inspections");
+  assert.equal(positive.child.callbacks.filter((name) => name === "readThreadsNativeColumn").length, 2);
+  assert.equal(positive.parent.callbacks.filter((name) => name === "readThreadsNativeColumn").length, 3,
+    "the unchanged original parent is read initially and twice after the child proof");
+  assertReadOnlyLifecycle(positive);
+
+  for (const [name, mutate, error] of [
+    ["wrong immediate parent", (t) => { t.parent.childOriginal.anchor.attrs.href = "/@other.reader/post/WrongParent"; }, /native parent context/u],
+    ["wrong original ancestor", (t) => { t.parent.childRoot.anchor.attrs.href = "/@example.owner/post/WrongRoot"; }, /native parent context/u],
+    ["reversed ancestors", (t) => t.parent.childContext.replaceChildren(t.parent.childParentRow, t.parent.childRootRow), /native parent context/u],
+    ["wrong own author", (t) => { t.parent.childFocus.profile.attrs.href = "/@another.owner"; }, /native parent context/u],
+    ["wrong full body", (t) => t.parent.childFocus.content.replaceChildren("Not the approved reply"), /approved text and immediate parent/u],
+    ["child URL drift", (t) => { t.onChildEvaluate = (name, state) => {
+      if (name === "readThreadsNativeColumn") state.url = "https://www.threads.com/@another.owner/post/WrongURL";
+    }; }, /URL changed/u],
+    ["child ID drift", (t) => { t.onChildEvaluate = (name, state) => {
+      if (name === "readThreadsNativeColumn") state.tab.id = `changed-child-${sequence}`;
+    }; }, /tab|identity/u],
+    ["child retained handle drift", (t) => { t.onChildEvaluate = (name, state) => {
+      if (name === "readThreadsNativeColumn") state.tab.url = async () => state.url;
+    }; }, /retained CUA Tab handle changed/u],
+    ["browser extension drift", (t) => { t.onChildEvaluate = (name) => {
+      if (name === "readThreadsNativeColumn") t.extension = "changed-extension";
+    }; }, /extensionInstanceId changed/u],
+    ["parent URL drift while child inspected", (t) => { t.onChildEvaluate = (name) => {
+      if (name === "readThreadsNativeColumn") t.parent.url = "https://www.threads.com/@another.owner/post/WrongURL";
+    }; }, /URL differs|URL changed/u],
+    ["final parent body drift", (t) => { t.parent.onEvaluate = (name, state) => {
+      if (name === "discoverThreadsOwnChildLinks" && ++state.discoveryReads === 2) state.zero.focus.content.replaceChildren("Changed parent body");
+    }; }, /verified parent/u],
+    ["final parent URL drift", (t) => { t.parent.onEvaluate = (name, state) => {
+      if (name === "discoverThreadsOwnChildLinks" && ++state.discoveryReads === 2) state.url = "https://www.threads.com/@another.owner/post/WrongURL";
+    }; }, /URL changed/u],
+  ]) {
+    const test = nextCase(); mutate(test);
+    await assert.rejects(inspect(test), error, name);
+    assertReadOnlyLifecycle(test);
+  }
+  const missing = nextCase();
+  missing.parent.zero.tailPagelet.replaceChildren();
+  await assert.rejects(inspect(missing), /no unique own child candidate/u);
+  assertReadOnlyLifecycle(missing, false);
+
+  const creationFailed = nextCase();
+  creationFailed.creationError = new Error("documented CUA creation failed");
+  await assert.rejects(inspect(creationFailed), (error) => error === creationFailed.creationError);
+  assertReadOnlyLifecycle(creationFailed);
+  assert.equal(creationFailed.child, null, "creation failure cannot fall back to navigating the parent");
+}
+
 testObservedZeroTerminal();
 testZeroLayoutAndChildrenRejections();
 testZeroMarkerPendingAndIdentityRejections();
@@ -706,6 +832,7 @@ await testSourceOwnedPreparationCandidates();
 await testSourceOwnedPreparationRejections();
 await testFinalBoundSurfaceDriftRejections();
 await testPositiveChildReadback();
+await testCuaChildUsesNewOwnedTabWithoutParentNavigation();
 const revalidation = sourceFixture();
 const prepared = await prepareThreadsCanaryReply(revalidation.tab, action);
 revalidation.modal.textbox.append(action.reply_text);

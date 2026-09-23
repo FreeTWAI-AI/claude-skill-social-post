@@ -1,6 +1,6 @@
 # Chrome Comment Operations（零 API）
 
-> last_verified: 2026-08-31
+> last_verified: 2026-09-05
 > scope: 使用已登入 Chrome，處理 Facebook／Instagram／Threads 可見文字留言；不使用 Meta API。
 
 這是 P5 Comment Ops 的唯一共用流程。平台畫面細節仍要讀目標平台 reference，並以當下可見 UI 為準。
@@ -78,7 +78,7 @@ python scripts/comment_capability_gate.py --write-projection
 `--write-projection` 只重建公開 structural report，不會也不能升級 canonical 狀態；`--projection-only` 沒有 private canonical parity 時只可回報 non-authoritative structural validity。
 
 所有寫入 command 預設 dry-run；確認 JSON 正確才加 `--write`。
-目前 release 的泛用 live Chrome 送出預設停用；來源綁定的只讀回填與單則 IG canary 是分開的窄入口。下列分離式送出契約不代表 production 已啟用，也不能用隔離 fixture 的成功輸出宣稱通過登入 Meta canary。
+目前 release 的泛用 live Chrome 送出預設停用；來源綁定的只讀回填與單則 IG／Threads canary 是分開的窄入口。平台及 runtime 的實證狀態只以 `chrome-comment-adapter.md` 為準。下列分離式送出契約不代表 production 已啟用，也不能用隔離 fixture 的成功輸出宣稱通過登入 Meta canary。
 
 ## 1. 選定範圍
 

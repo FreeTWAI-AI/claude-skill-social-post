@@ -99,8 +99,14 @@ def _require_canary_native_mention(
         raise ValueError("approved Instagram reply must preserve the exact native target mention")
     evidence = raw.get("selected_parent_evidence")
     keys = {"schema_version", "action_digest", "observed_url", "comment_key", "platform_comment_id",
-            "author_key", "document_binding", "trigger_locator_digest", "composer_node_id", "initial_text"}
-    if not isinstance(evidence, dict) or set(evidence) != keys or type(evidence.get("schema_version")) is not int or evidence["schema_version"] != 1:
+            "author_key", "document_binding", "trigger_locator_digest", "initial_text"}
+    version = evidence.get("schema_version") if isinstance(evidence, dict) else None
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("native selected-parent evidence has an invalid schema")
+    keys.update({"composer_node_id"} if version == 1 else {
+        "selection_kind", "composer_scope", "stable_reads",
+    })
+    if set(evidence) != keys:
         raise ValueError("native selected-parent evidence has an invalid schema")
     expected = {
         "action_digest": _json_digest(action), "observed_url": raw["observed_url"],
@@ -131,7 +137,16 @@ def _require_canary_native_mention(
             or _required_digest(binding, "target_digest") != target_digest):
         raise ValueError("native selected-parent document binding differs from the canonical target")
     _required_string(binding, "tab_id")
-    _required_string(evidence, "composer_node_id")
+    if version == 1:
+        _required_string(evidence, "composer_node_id")
+    elif (evidence["selection_kind"] != "source_clicked_instagram_native_reply"
+          or evidence["composer_scope"] != "unique_native_post_form"
+          or type(evidence["stable_reads"]) is not int or evidence["stable_reads"] != 2):
+        # CUA cannot claim a persistent DOM node. This version records the
+        # source-selected, twice-read semantic form contract instead. It still
+        # requires the same canonical lease/action/parent/mention/digest above;
+        # schema acceptance alone is not browser provenance or send authority.
+        raise ValueError("native semantic selection evidence is not source-selected and stable")
     if _required_digest(raw, "selected_parent_evidence_digest") != _json_digest(evidence):
         raise ValueError("native selected-parent evidence digest differs")
 

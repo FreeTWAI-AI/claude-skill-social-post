@@ -7,7 +7,7 @@ description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語
 
 把內容生成、實際發布與成效學習分開。依意圖只讀必要資料，不把整個案例庫一次塞進 context。
 
-P5 執行前先核對 `references/chrome-comment-adapter.md` 的當前狀態：舊 SDK 的 IG 單則 canary 已完成真實送出及唯讀 recovery 對帳；2026-09-05 當前 CUA 的 Threads 單則 canary 已送出一次並取得原生 own-child 正向觀測，canonical ledger 尚為 `needs_reconcile`。exact-tab recovery 來源修正已通過 focused tests；當前 Chrome 控制連線無法進行原生檢查，真實唯讀結算尚待恢復連線後完成，未新增 recovery／rotation 事件。當前 CUA 送出只支援 Threads 單則候選，泛用 production 仍關閉。target-only 不代表整篇／回覆串已掃完，semantic UI continuity 不代表實體 document epoch 或持久 node identity。單則實證不代表三平台完整自動回覆完成，也不會自動升級 capability；不得用 fixture 或候選程式存在代替其他真實送出證據。
+P5 執行前核對 `references/chrome-comment-adapter.md` 的當前狀態。CUA Threads 單則已完成真實送出與唯讀對帳；CUA IG 候選已接入但尚無新 runtime 送出實證；FB 送出與三平台批次仍未完成，泛用 production 關閉。target-only 不代表整篇／回覆串已掃完，semantic UI continuity 不代表實體 document epoch 或持久 node identity。單則實證不升級整體 capability，fixture 或候選程式存在也不能代替真實操作證據。
 
 ## Session 啟動
 
@@ -17,11 +17,11 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 
 | 觸發 | Mode | 必讀 |
 |---|---|---|
-| 重新規劃、排內容 | P0 Plan | `references/phase0_plan.md`＋`current_brief.md`＋`scripts/social_data.py comparables` compact context＋目標 formula |
+| 重新規劃、排內容 | P0 Plan | `references/phase0_plan.md`＋`current_brief.md`＋`scripts/social_data.py comparables` compact context＋目標 formula；X 題材另讀 `references/x.md` 的演算法邊界 |
 | 重新學語氣 | P1 Learn Voice | `references/learn_style.md`＋`style_profile.md` |
-| 寫一篇、PO、發文 | P2 Draft／Publish | `references/generate_and_publish.md`＋`voice_quick.md`＋`current_brief.md`＋`scripts/social_data.py comparables` compact context＋單一 formula；確認後才讀平台 ref |
+| 寫一篇、PO、發文 | P2 Draft／Publish | `references/generate_and_publish.md`＋`voice_quick.md`＋`current_brief.md`＋`scripts/social_data.py comparables` compact context＋單一 formula；X 草稿先讀 `references/x.md` 的策略段，實際發布前再核對平台 UI |
 | 把數據訓練進來、記錄成效 | P3 Log Outcome | `references/outcome-workflow.md`＋`data/*.jsonl` |
-| 比較貼文／集數、找 pattern | P4 Optimize Patterns | `references/outcome-workflow.md`＋`references/evaluation.md`＋相關 rules |
+| 比較貼文／集數、找 pattern | P4 Optimize Patterns | `references/outcome-workflow.md`＋`references/evaluation.md`＋相關 rules；X 演算法解釋另讀 `references/x.md` |
 | 掃描、草擬、回覆 FB／IG／Threads 留言 | P5 Comment Ops | `references/comment-operations.md`＋實際操作時的 `references/chrome-comment-adapter.md`＋`scripts/comment_chrome_actuator.mjs`＋`references/comment-policy.json`＋目標平台 ref＋`voice_quick.md` |
 | 查歷史 Case | Legacy Case | `references/case_studies.md` 索引，再讀單一 `references/cases/case-NN.md` |
 
@@ -84,7 +84,7 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 - 使用者若在當前 session 明示「你自己操作不用問」，私人版可免逐次確認；不跨 session。
 - 不幫登入、不改帳號／隱私、不刪文、不自動按讚／follow／大量留言。
 - P5 完整掃描前先以當前 session 建立有期限的 browser scan request，Chrome receipt 只能回綁既定帳號／貼文 scope，完成掃描即追加可區分零留言的 completion event。production scan 模組不含 fixture factory，只接受 source-controlled、trusted-host-resolved、版本化、deep-frozen 且 process-branded 的 FB／IG／Threads plan；目前泛用完整掃描 registry 全部 unavailable，指定留言 target-only 回填是獨立範圍。完整展開必須由 versioned exhaustion contract 證明 cursor traversal、monotonic discovered count、explicit terminal 與 terminal coverage；兩次空 viewport read、raw selector、fake tab、caller resolver 或 `threadExpansionComplete` 宣告都無效。P5 預設 `batch_confirm`；`bounded_auto` 只在當前 session 明示平台、帳號、貼文與本輪範圍後，以有期限、指定 scope、有限次數的 ledger grant 啟用。每則回覆都要一次性 permit；重算 reply hash，綁定 action／fresh locator／正確父留言與零 exact-own baseline。泛用送出契約在碰 trigger、消耗 durable claim、finish 與 recovery reinspection 前，另以 version 1 exhaustion 證明 target-scoped cursor／count／traversal／terminal stable coverage；`0` reply 或 `0` expander 不構成 absence。later page／lazy expander、無 terminal、virtualization 或 stable-node replacement 不能當泛用完整證據，claim 前發現則零 claim／submit，recovery 不得推導 not-sent。Threads 單則候選另用原生 explicit-zero marker、兩次穩定讀取與來源點選的空 modal；只提供 semantic selection，不取得泛用 complete／absence 或持久節點 authority。之後才可經 durable atomic claim、process-wide 單次送出及原生結果驗證。finish／reconcile 另須由 shell:false branded bridge 持有 versioned 一次性 capability；ledger 只存 nonce hash、scope binding 與 receipt digest。裸 `WRITE_OK`、raw／fixture receipt、偽 nonce、重播 capability，或冒充完整掃描的部分回覆串一律拒絕；分批執行不得重置 grant 上限。
-- 正式版 `comment-policy.json` 的 `live_browser_actuation_enabled` 預設為 `false`；來源綁定的只讀回填另受 `live_browser_scan_enabled` 控制。泛用送出仍關閉；單則候選只可使用當前 session 明確授權、綁定已核准 action／source digest、最長 300 秒且限一則的 canonical canary lease，經來源持有的 `executeCanaryReply` 執行。當前 CUA 只接 Threads；IG 是舊 SDK 的歷史實證。lease 不開啟 production、不升級 capability、不允許 caller 偽造 preparation；IG 的 `@author` 原生帶入與 Threads 的真正空 modal 分別如實記錄。成功只認正確父留言下的新 exact-own 回覆及有效帳本結算，未知立即停止且不得重送。
+- 正式版 `comment-policy.json` 的 `live_browser_actuation_enabled` 預設為 `false`；來源綁定的只讀回填另受 `live_browser_scan_enabled` 控制。泛用送出仍關閉；單則候選只可使用當前 session 明確授權、綁定已核准 action／source digest、最長 300 秒且限一則的 canonical canary lease，經來源持有的 `executeCanaryReply` 執行。CUA 接入 Threads 與 IG 的單則 preparation，但實證狀態須分開核對。lease 不開啟 production、不升級 capability、不允許 caller 偽造 preparation；IG 的 `@author` 原生帶入與 Threads 的真正空 modal 分別如實記錄。成功只認正確父留言下的新 exact-own 回覆及有效帳本結算，未知立即停止且不得重送。對帳只展開／讀取，不得走送出前的選取或填字流程。
 - 送出結果不明時標記 `needs_reconcile` 並停止整批；未重新讀取畫面前不得重送。零 API Chrome 模式不宣稱 24/7 背景監聽。
 - `send_started`／`needs_reconcile` 後若 Node／Chrome 重啟或 receipt capability 過期，只能由 fused actuator 以 fresh session 進入 reconcile recovery；bearer 留在私有 Node 閉包，保留原 attempt、不得重發 submit claim、不得退回 `approved`。
 - P5 不處理私訊、媒體／GIF 回覆或全帳號歷史爬取；大量 keyword 索取改用單一公開作者留言提供自助入口。
@@ -94,7 +94,7 @@ P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要�
 
 ## 平台規則
 
-平台規格會變。Hashtag、字數、發佈 UI、演算法等時效規則只在目標平台 reference 維護，標示 last verified；跨 skill 衝突時先查權威來源，不同時保留兩個硬數字。
+平台規格會變。Hashtag、字數、發佈 UI、演算法等時效規則只在目標平台 reference 維護，標示 last verified；跨 skill 衝突時先查權威來源，不同時保留兩個硬數字。X 的 For You 機制、來源版本與可觀測邊界見 `references/x.md`；不得把原始碼的預測權重當成實際互動兌換率或保證觸及的寫作公式。
 
 UI 改版只更新已授權平台的 reader／selection／result 模組及相應測試，不重寫或放寬共用 ledger、permit 與單次 claim 契約。權限拒絕、CAPTCHA、checkpoint 或平台限制必須暫停，不以換 URL、runtime、帳號或自動重試繞過，也不保證不中斷運作。
 

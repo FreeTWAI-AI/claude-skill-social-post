@@ -111,6 +111,16 @@ def rebind(raw: dict) -> dict:
     return raw
 
 
+def semantic_native_preflight(action: dict) -> dict:
+    raw = native_preflight(action)
+    evidence = raw["selected_parent_evidence"]
+    del evidence["composer_node_id"]
+    evidence.update(schema_version=2, selection_kind="source_clicked_instagram_native_reply",
+                    composer_scope="unique_native_post_form", stable_reads=2)
+    raw["selected_parent_evidence_digest"] = _json_digest(evidence)
+    return rebind(raw)
+
+
 class CanaryLeaseTests(unittest.TestCase):
     def test_legacy_raw_observation_cannot_issue_canary(self):
         with tempfile.TemporaryDirectory(prefix="social-canary-legacy-") as raw:
@@ -282,6 +292,71 @@ class CanaryLeaseTests(unittest.TestCase):
         with fixture("instagram") as (root, script, _comment, _intent, action):
             lease = issue(root, script, action["intent_id"], "--write")
             begin(root, script, action, lease, receipt=native_preflight(action), expected=2)
+
+    def test_semantic_native_mention_preserves_legacy_and_rejects_false_selection(self):
+        with fixture("instagram", mention=True) as (root, script, comment, intent, action):
+            lease = issue(root, script, intent, "--write")
+            state = intent_state(root, intent)
+            def validate(raw, lease_id=lease["lease_id"]):
+                return validate_browser_preflight(raw, {comment["comment_key"]: comment},
+                    {comment["comment_key"]: state}, POLICY, intent, SESSION_ID, canary_lease_id=lease_id)
+            # The same canonical action, lease and evaluator accept both the
+            # unchanged historical v1 and the explicitly semantic v2 contract.
+            validate(native_preflight(action))
+            receipt = semantic_native_preflight(action)
+            validated = validate(receipt)
+            self.assertEqual(validated["selected_parent_evidence"]["schema_version"], 2)
+            self.assertNotIn("composer_node_id", validated["selected_parent_evidence"])
+            before = (root / "data/reply_events.jsonl").read_bytes()
+            with self.assertRaises(ValueError):
+                validate(receipt, None)
+            for field, value in (
+                ("schema_version", True), ("schema_version", 1), ("schema_version", 3),
+                ("selection_kind", "mention_prefill_only"),
+                ("selection_kind", "source_clicked_threads_native_reply"),
+                ("composer_scope", "any_visible_editor"), ("stable_reads", 0),
+                ("stable_reads", 1), ("stable_reads", True), ("stable_reads", "2"),
+                ("composer_node_id", "invented-node"), ("document_epoch", "invented-epoch"),
+                ("author_key", "another_reader"), ("platform_comment_id", "another_parent"),
+                ("comment_key", "another_comment"), ("action_digest", "0" * 64),
+                ("observed_url", action["post_permalink"]), ("initial_text", "@another_reader "),
+                ("trigger_locator_digest", "0" * 64),
+            ):
+                bad = deepcopy(receipt)
+                bad["selected_parent_evidence"][field] = value
+                bad["selected_parent_evidence_digest"] = _json_digest(bad["selected_parent_evidence"])
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    validate(rebind(bad))
+            for field in ("selection_kind", "composer_scope", "stable_reads"):
+                bad = deepcopy(receipt)
+                del bad["selected_parent_evidence"][field]
+                bad["selected_parent_evidence_digest"] = _json_digest(bad["selected_parent_evidence"])
+                with self.subTest(missing=field), self.assertRaises(ValueError):
+                    validate(rebind(bad))
+            for field, value in (("kind", "physical_document_epoch"), ("tab_id", ""),
+                                 ("target_digest", "0" * 64), ("observed_url", action["post_permalink"])):
+                bad = deepcopy(receipt)
+                bad["selected_parent_evidence"]["document_binding"][field] = value
+                bad["selected_parent_evidence_digest"] = _json_digest(bad["selected_parent_evidence"])
+                with self.subTest(binding_field=field), self.assertRaises(ValueError):
+                    validate(rebind(bad))
+            for changes in ({"composer_initial_text": "@another_reader "},
+                            {"composer_empty_before_fill": True},
+                            {"selected_parent_evidence_digest": "0" * 64}):
+                with self.subTest(changes=changes), self.assertRaises(ValueError):
+                    validate(rebind({**receipt, **changes}))
+            stale_digest = deepcopy(receipt)
+            stale_digest["selected_parent_evidence"]["document_binding"]["tab_id"] = "different-tab"
+            stale_digest["selected_parent_evidence_digest"] = _json_digest(stale_digest["selected_parent_evidence"])
+            with self.assertRaisesRegex(ValueError, "preparation_id integrity"):
+                validate(stale_digest)
+            self.assertEqual((root / "data/reply_events.jsonl").read_bytes(), before)
+            # Exercise the real isolated CLI claim after all negatives; the
+            # persisted attempt keeps v2 rather than inventing a legacy node ID.
+            begin(root, script, action, lease, receipt=receipt)
+            attempt = intent_state(root, intent)["attempt"]
+            self.assertEqual(attempt["browser_selected_parent_evidence"]["schema_version"], 2)
+            self.assertNotIn("composer_node_id", attempt["browser_selected_parent_evidence"])
 
 
 def run_canary_tests() -> None:

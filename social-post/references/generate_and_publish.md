@@ -9,7 +9,7 @@
 3. comparables 的日期、星期、精確分鐘只供提出待驗證候選，不得當生成分數、因果權重或固定黃金時段；同分鐘有高低反例時更不得以時間排名文案。
 4. 從 `data/rule_registry.json` 找任務相關規則，只開必要的 `rules/RNN.md`。
 5. 從 formula index 找一個目標公式，只開該 formula 檔；不要讀完整公式庫。
-6. 草稿階段不讀平台 UI 流程。只有使用者確認要實際發布後，才讀目標平台 reference。
+6. X 草稿另讀 `x.md` 的演算法邊界與 Social Post 使用方式；草稿階段不讀平台 UI 流程。只有使用者確認要實際發布後，才核對目標平台的 UI 與限制。
 7. 只有重新學 voice／深度仿寫時才讀完整 `style_profile.md` 或使用者明確指定的 voice Skill。
 
 ## 發文前三檢查

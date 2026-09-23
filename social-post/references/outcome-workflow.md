@@ -24,6 +24,8 @@
 
 任何其他 Skill 收到 FB／IG／YouTube／Threads／X 的流量、演算法、留存、受眾或轉化證據時，都要路由到本資料層。專門 Skill 可保留診斷方法，但不得另存一套會漂移的 outcome memory。跨平台同內容要共用永久 `post_id`，平台各自建 snapshot；只有 Meta 合併卡片時只記 reference，不虛構缺少的平台完整洞察。
 
+X 快照只記平台實際提供的 impressions／views、互動類別、點擊、停留、追蹤與下游轉化；缺少的欄位維持 `null`。公開 For You 原始碼的權重對應的是個別讀者的預測，不得套到貼文總互動數生成「演算法分數」。若以公開機制提出實驗假設，在 experiment 記來源 commit、可觀測指標、maturity 與 confound；規則是否成立仍由私有實測決定，見 `x.md`。
+
 ## Log Outcome
 
 1. 確認貼文 identity、平台、發布時間與時區。

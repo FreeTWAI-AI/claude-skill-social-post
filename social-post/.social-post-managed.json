@@ -71,6 +71,8 @@
     "scripts/comment_chrome_host_authority.mjs",
     "scripts/comment_chrome_host_authority_test.mjs",
     "scripts/comment_chrome_instagram_reader.mjs",
+    "scripts/comment_chrome_instagram_selection.mjs",
+    "scripts/comment_chrome_instagram_selection_test.mjs",
     "scripts/comment_chrome_instagram_surface.mjs",
     "scripts/comment_chrome_live_bridge_test.mjs",
     "scripts/comment_chrome_live_common.mjs",

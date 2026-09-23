@@ -3,6 +3,16 @@
 > 主協定：[Chrome Comment Adapter Protocol](chrome-comment-adapter.md)
 > last_verified: 2026-08-30
 
+## 目錄
+
+- 離線與受控測試
+- Production promotion 權威與 Exact promotion DAG
+- 平台矩陣
+- JavaScript architecture gate
+- Reinspection JSON example
+
+## 離線與受控測試
+
 - `node scripts/comment_chrome_actuator_test.mjs`：純 Node fail-closed、parent binding、零基線、併發與 actor recreation regression。
 - `node scripts/comment_chrome_scan_adapters_test.mjs`：production/fixture registry 隔離、brand／immutability、raw-live／clone／跨平台拒絕、cursor／terminal exhaustion、monotonic count、遲到控制／留言、virtualization 與 same-fingerprint replacement 零點擊 regression。
 - `comment_chrome_node_frame_mapping.mjs` 只保留 production-safe schema、平台驗證與 immutable descriptor；final-scan DOM reader、WeakSet process brand 與 attestation 全移到 `comment_chrome_node_frame_mapping_testonly.mjs`，且沒有 compatibility re-export。`comment_chrome_node_frame_mapping_test.mjs` 只校準 FB／IG／Threads final-scan 綁定；六階段 fixture lifecycle 已拆到 actuator manifest 明確呼叫的 `comment_chrome_node_frame_lifecycle_test.mjs`，實作由明確標示 `*_testonly.mjs` 的 session/attestation 與 snapshot reader 負責，production mapping 不反向依賴 fixture。exact `expand → reply_trigger → composer_fill → submit_preflight → finish → recovery_reinspection` 每階段固定雙讀，沿用 frame、document epoch、comment identity、parent anchor 與 node roles，並以 process-brand、前階 attestation、一次性 consume、stage order 與 reply cardinality 封閉重播；brand／順序／跨平台／clone、frame／epoch／node／parent／comment 漂移、role collision、錯誤 finish cardinality 與 recovery rerender 全部 fail closed。輸出的 `test_only_full_lifecycle_mapping` 仍只來自 fake fixture；序列化後 Python 最多承認 non-authoritative structural report，不能保存 JS process-brand，也不證明 native Chrome frame owner。

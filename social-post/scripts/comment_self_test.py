@@ -46,6 +46,7 @@ JS_TEST_MODULES = {
     "scripts/comment_chrome_facebook_child_reader_test.mjs",
     "scripts/comment_chrome_fixture_contract_test.mjs",
     "scripts/comment_chrome_host_authority_test.mjs",
+    "scripts/comment_chrome_instagram_selection_test.mjs",
     "scripts/comment_chrome_live_bridge_test.mjs",
     "scripts/comment_chrome_live_surface_test.mjs",
     "scripts/comment_chrome_live_surface_candidate_cases_test.mjs",
@@ -164,6 +165,12 @@ def run_chrome_actuator_tests() -> None:
             "PASS Facebook native child reader DOM and source continuity tests "
             "(anonymous; no browser or submission)",
             "Facebook child reader success marker is missing",
+        ),
+        (
+            "comment_chrome_instagram_selection_test.mjs",
+            "PASS IG CUA native selection and integrated single dispatch "
+            "(anonymous DOM; simulated I/O only)",
+            "Instagram semantic selection child success marker is missing",
         ),
         (
             "comment_chrome_threads_reader_test.mjs",

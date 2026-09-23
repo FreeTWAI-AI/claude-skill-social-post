@@ -7,6 +7,7 @@ import * as cuaRuntime from "./comment_cua_runtime.mjs";
 const source = await readFile(new URL("./comment_chrome_claim_bridge.mjs", import.meta.url), "utf8");
 const names = ["requireLiveSubmitTransport", "requireCurrentReplyPermit", "readExactLiveComposer", "isEmptyThreadsComposer",
   "requireCanaryThread", "inspectReadyLiveComposer", "prepareLiveCanaryReply",
+  "nativeMentionPreparation", "prepareInstagramCuaLiveReply",
   "prepareThreadsLiveReply", "inspectLiveFinishReceipt", "submitLiveReplyAndFinish"];
 function functionSource(name) {
   const declaration = new RegExp(`^(?:export )?(?:async )?function ${name}\\(`, "mu");
@@ -137,7 +138,7 @@ function isolatedCase(options = {}) {
 
 for (const [name, options, message] of [
   ["missing transport", { cua: false }, /supported source-bound submit transport/u],
-  ["unsupported CUA platform", { platform: "instagram" }, /only for the native Threads/u],
+  ["unsupported CUA platform", { platform: "facebook" }, /only for native Threads\/Instagram/u],
   ["wrong CUA target", { url: "https://www.threads.com/@another.reader/post/Other456" }, /target URL changed/u],
 ]) {
   const test = isolatedCase(options);

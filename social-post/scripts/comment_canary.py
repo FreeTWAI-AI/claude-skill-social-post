@@ -43,6 +43,7 @@ _SOURCE_FILES = tuple(sorted((
     "scripts/comment_chrome_threads_canary_surface.mjs", "scripts/comment_chrome_threads_modal_reader.mjs",
     "scripts/comment_chrome_threads_result_reader.mjs",
     "scripts/comment_chrome_instagram_surface.mjs", "scripts/comment_chrome_instagram_reader.mjs",
+    "scripts/comment_chrome_instagram_selection.mjs",
     "scripts/comment_chrome_runtime_authority.mjs", "scripts/comment_chrome_send_support.mjs",
     "scripts/comment_chrome_runtime_document.mjs", "scripts/comment_chrome_node_identity.mjs",
     "scripts/comment_chrome_send.mjs", "scripts/comment_chrome_reply_exhaustion.mjs",

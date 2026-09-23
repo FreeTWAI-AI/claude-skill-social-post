@@ -246,6 +246,12 @@ function runManifestAndRoleChecks(assertCheck) {
     scoped.filter((path) => path !== "scripts/comment_cua_runtime.mjs"),
   ).some((item) => item.code === "closed-inventory-member-missing"
     && item.paths.includes("scripts/comment_cua_runtime.mjs")));
+  assertCheck("instagram-selection-and-test-have-explicit-roles", (
+    moduleRoleFor("scripts/comment_chrome_instagram_selection.mjs") === "production"
+      && moduleRoleFor("scripts/comment_chrome_instagram_selection_test.mjs") === "test"
+      && scoped.includes("scripts/comment_chrome_instagram_selection.mjs")
+      && scoped.includes("scripts/comment_chrome_instagram_selection_test.mjs")
+  ));
   const unreviewedCua = "scripts/comment_cua_unreviewed.mjs";
   assertCheck("unreviewed-cua-discovered-and-rejected", isInventoryPath(unreviewedCua)
     && evaluateInventoryManifest([...scoped, unreviewedCua]).some((item) => (
@@ -415,6 +421,21 @@ function runGraphChecks(assertCheck) {
   assertCheck("send-support-required-edge-missing-rejected", (
     hasCode(supportMissing, "missing-required-edge")
   ));
+  for (const [label, source, target] of [
+    ["threads-positive-child-cua", "scripts/comment_chrome_threads_result_reader.mjs", "scripts/comment_cua_runtime.mjs"],
+    ["threads-positive-child-cua-test", "scripts/comment_chrome_threads_canary_surface_test.mjs", "scripts/comment_cua_runtime.mjs"],
+    ["instagram-source-selection-cua", "scripts/comment_chrome_instagram_selection.mjs", "scripts/comment_cua_runtime.mjs"],
+    ["instagram-source-selection-test", "scripts/comment_chrome_instagram_selection_test.mjs", "scripts/comment_chrome_instagram_selection.mjs"],
+    ["facebook-account-probe-cua", "scripts/comment_chrome_facebook_surface.mjs", "scripts/comment_cua_runtime.mjs"],
+    ["facebook-account-probe-consumer-test", "scripts/comment_cua_runtime_test.mjs", "scripts/comment_chrome_facebook_surface.mjs"],
+    ["instagram-selection-live-router", "scripts/comment_chrome_live_surface.mjs", "scripts/comment_chrome_instagram_selection.mjs"],
+    ["cua-live-router", "scripts/comment_chrome_live_surface.mjs", "scripts/comment_cua_runtime.mjs"],
+  ]) {
+    const removed = evaluateArchitecture(baseline.modules, baseline.edges.filter((item) => !(
+      item.source === source && item.target === target
+    )));
+    assertCheck(`${label}-required-edge-missing-rejected`, hasCode(removed, "missing-required-edge"));
+  }
 }
 
 async function expectRejected(assertCheck, id, action) {

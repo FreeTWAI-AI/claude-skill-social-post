@@ -22,6 +22,7 @@ import {
   bindLiveReplyBrowser, bindLiveSubmitNode, inspectLiveReplySurface, liveReplyUrl,
   prepareLiveReplyThread, inspectLiveCanaryResult, readLiveTargetComment,
   inspectLiveCanarySurface, revalidateThreadsSelection,
+  prepareInstagramCanarySelection, revalidateInstagramCanarySelection,
   LIVE_REPLY_ADAPTER_VERSION,
 } from "./comment_chrome_live_surface.mjs";
 
@@ -55,10 +56,10 @@ async function createLiveCommentTab(browser, url) {
 async function requireLiveSubmitTransport(tab, action, canary) {
   if (isCommentCuaTab(tab)) {
     await requireCommentCuaTab(tab, liveReplyUrl(action));
-    // Native selected-modal continuity is implemented for Threads. Other
-    // platforms must migrate their selection contracts before CUA can send.
-    if (!canary || action.scope.platform !== "threads") {
-      fail("CUA submit is available only for the native Threads single-action candidate");
+    // Only versioned native selection candidates can use documented CUA
+    // submit. This does not open generic production or grant a canary lease.
+    if (!canary || !["threads", "instagram"].includes(action.scope.platform)) {
+      fail("CUA submit is available only for native Threads/Instagram single-action candidates");
     }
     return "cua_semantic_selection";
   }
@@ -252,6 +253,8 @@ async function inspectReadyLiveComposer(tab, action, canary) {
         || digestObject(selected.document_binding) !== digestObject(surface.replyExhaustionCandidate.document_binding)
         || (action.scope.platform === "threads"
           ? (await revalidateThreadsSelection(tab, action)).selection_digest !== selected.selection_digest
+          : isCommentCuaTab(tab)
+            ? (await revalidateInstagramCanarySelection(tab, action)).selection_digest !== selected.selection_digest
           : await bindLiveSubmitNode(tab, composer) !== selected.composer_node_id)) {
       fail("canary composer lost its source-owned parent selection");
     }
@@ -263,8 +266,9 @@ async function prepareLiveCanaryReply(tab, action, plan, canary) {
   await requireLiveReplyPolicy(canary);
   requireCurrentReplyPermit(action);
   // Detect incompatible transport before selecting a parent or filling text.
-  await requireLiveSubmitTransport(tab, action, canary);
+  const transport = await requireLiveSubmitTransport(tab, action, canary);
   if (action.scope.platform === "threads") return prepareThreadsLiveReply(tab, action, plan, canary);
+  if (transport === "cua_semantic_selection") return prepareInstagramCuaLiveReply(tab, action, plan, canary);
   let surface = requireCanaryThread(await prepareLiveReplyThread(tab, action), action);
   surface = requireCanaryThread(await inspectLiveReplySurface(tab, action, "before"), action);
   const initialComposer = await unique(surface.composer, "canary untouched composer", { enabled: true });
@@ -304,6 +308,10 @@ async function prepareLiveCanaryReply(tab, action, plan, canary) {
   await requireLiveReplyPolicy(canary);
   await composer.fill(action.reply_text, { timeoutMs: 5000 });
   const ready = await inspectReadyLiveComposer(tab, action, canary);
+  return nativeMentionPreparation(action, plan, ready, selection, prefix);
+}
+
+function nativeMentionPreparation(action, plan, ready, selection, prefix) {
   const receipt = {
     schema_version: 1, test_only: false, action_id: action.action_id,
     intent_id: action.intent_id, session_id: action.session_id, permit_id: action.permit_id,
@@ -319,6 +327,33 @@ async function prepareLiveCanaryReply(tab, action, plan, canary) {
   };
   receipt.preparation_id = digestObject(preparationCore(receipt));
   return immutableJsonSnapshot(receipt, "live canary preparation");
+}
+
+async function prepareInstagramCuaLiveReply(tab, action, plan, canary) {
+  const selected = requireCanaryThread(await prepareInstagramCanarySelection(tab, action), action);
+  const prefix = `@${action.author_key} `;
+  if (!selected.selectedParentCandidate || selected.selection?.schema_version !== 2
+      || selected.selection_digest !== digestObject(selected.selection)
+      || selected.composerText !== prefix || !action.reply_text.startsWith(prefix)) {
+    fail("Instagram CUA source-selected native mention is not verified");
+  }
+  liveCanarySelections.set(tab, immutableJsonSnapshot({
+    action_digest: actionDigest(action), observed_url: selected.observedUrl,
+    document_binding: selected.replyExhaustionCandidate.document_binding,
+    selection_digest: selected.selection_digest,
+  }, "Instagram source-selected semantic composer binding"));
+  await requireLiveReplyPolicy(canary);
+  requireCurrentReplyPermit(action);
+  const fresh = requireCanaryThread(await revalidateInstagramCanarySelection(tab, action), action);
+  if (fresh.selection_digest !== selected.selection_digest
+      || await readExactLiveComposer(fresh.composer) !== prefix) {
+    fail("Instagram CUA parent or native mention changed before fill");
+  }
+  // Exactly one approved fill; success is determined by the native value
+  // readback below, never by the transport returning without an error.
+  await fresh.composer.fill(action.reply_text, { timeoutMs: 5000 });
+  const ready = await inspectReadyLiveComposer(tab, action, canary);
+  return nativeMentionPreparation(action, plan, ready, selected.selection, prefix);
 }
 
 async function prepareThreadsLiveReply(tab, action, plan, canary) {
@@ -768,12 +803,12 @@ async function inspectCanaryReinspectionReceipt(tab, context, sessionId) {
 }
 
 async function withPrivateRecoveryTab(context, inspect) {
-  return withSourceOwnedTargetIntakeTab(liveReplyUrl(context.action), async (tab) => {
+  return withSourceOwnedTargetTab(liveReplyUrl(context.action), async (tab) => {
     if (context.attempt.canary_lease_id) {
       await waitForNativeParent(tab, context.action);
     }
     return await inspect(tab);
-  });
+  }, true);
 }
 
 async function commitLiveReinspection(context, request) {
@@ -1509,6 +1544,11 @@ async function requireExactTargetIntakeTab(tab, expectedUrl, expectedTabId) {
 
 /** Listing locates a source-owned tab; it is never native observation evidence. */
 async function withSourceOwnedTargetIntakeTab(commentPermalink, inspect) {
+  return withSourceOwnedTargetTab(commentPermalink, inspect, false);
+}
+
+/** Only private read-only recovery can isolate an ambiguous target in a new tab. */
+async function withSourceOwnedTargetTab(commentPermalink, inspect, recoveryOnlyFreshOnAmbiguity) {
   const expectedUrl = canonicalUrl(commentPermalink).toString();
   const browser = await getLiveCommentBrowser();
   const listed = await browser.tabs.list();
@@ -1526,8 +1566,11 @@ async function withSourceOwnedTargetIntakeTab(commentPermalink, inspect) {
     if (id !== row.id) fail("native target intake listed tab id is malformed");
     matches.push(id);
   }
-  if (matches.length > 1) fail("native target intake has multiple exact URL tabs");
-  const created = matches.length === 0;
+  if (matches.length > 1 && recoveryOnlyFreshOnAmbiguity !== true) {
+    fail("native target intake has multiple exact URL tabs");
+  }
+  // Multiple matches never authorize borrowing one by ID/order or trying it.
+  const created = matches.length !== 1;
   const tab = created ? await createLiveCommentTab(browser, expectedUrl) : await browser.tabs.get(matches[0]);
   try {
     const tabId = requiredString(tab?.id, "native target intake tab id");

@@ -11,6 +11,7 @@
    - 四個 filter 缺一個時，輸出會標成 `cohort_is_exact:false` 與 `outcome_comparison_allowed:false`，只能拿來找資料，不能比較成效。
    - 選樣固定按發布時間取最近案例，明示 `performance_ranked:false`；它不是「最佳文案榜」，不得把回傳順序解讀成勝負或爆款分數。
 3. 跑 latest summary 只查看 KPI 與前篇是否仍成長；題材、archetype、CTA 與格式差異一律從 comparables context 讀，不把不同時間窗硬比。
+   X 內容另讀 `x.md` 的 For You 來源與邊界；把 hook、媒體、連結、hashtag 與發布時間當待驗證變因，不依公開權重預估觸及。
 4. 選 3–5 個內容 slot。每個 slot 只寫：題材、主目標、平台、archetype、唯一 CTA、要驗證的假設。
 5. 同敘事意圖與 archetype 保持間隔；前篇仍在長尾成長時，下一篇換 intent 或延後。
 6. 使用者明示同步發布時，slot 只維護一份 canonical copy。

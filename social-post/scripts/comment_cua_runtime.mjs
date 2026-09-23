@@ -84,7 +84,7 @@ function identityOf(browser) {
 
 async function freshBrowser() {
   if (!runtime) fail("runtime is not installed");
-  const browser = selectedBrowser(await runtime.getState(), runtime.identity.id);
+  const browser = selectedBrowser(await runtime.getState({ emit: false }), runtime.identity.id);
   const observed = identityOf(browser);
   for (const key of Object.keys(runtime.identity)) {
     if (observed[key] !== runtime.identity[key]) fail(`selected Chrome ${key} changed`);
@@ -182,7 +182,7 @@ export async function installCommentCuaRuntime(cua, options) {
     getState: cua.getState.bind(cua), getTab: cua.getTab.bind(cua),
     createBrowserTab: cua.createBrowserTab.bind(cua),
   });
-  const identity = identityOf(selectedBrowser(await calls.getState(), browserId));
+  const identity = identityOf(selectedBrowser(await calls.getState({ emit: false }), browserId));
   const descriptor = Object.freeze({
     runtime_version: COMMENT_CUA_RUNTIME_VERSION,
     transport: "documented host-supplied CUA API",
@@ -213,4 +213,110 @@ export function isCommentCuaTab(tab) {
 export async function requireCommentCuaTab(tab, expectedUrl) {
   if (!isCommentCuaTab(tab)) fail("Tab is not retained by this CUA runtime");
   return inspectHandle(tab, tabRecords.get(tab), exactMetaUrl(expectedUrl));
+}
+
+const FACEBOOK_ME_URL = "https://www.facebook.com/me/";
+
+function facebookAccountKey(value) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value)
+      || /^(?:me|login(?:\.php)?|checkpoint|recover|logout|settings)$/iu.test(value)) {
+    fail("an exact approved Facebook account key is required");
+  }
+  return value;
+}
+
+function facebookProbeUrl(value, account) {
+  // Fixed string forms deliberately do not normalize a foreign host, port,
+  // escaped path, dot segment, fragment or extra query into an approved URL.
+  if (value === FACEBOOK_ME_URL) return value;
+  const profile = `https://www.facebook.com/${account}`;
+  if (value === profile || value === `${profile}/`
+      || (/^[0-9]+$/u.test(account)
+        && value === `https://www.facebook.com/profile.php?id=${account}`)) return value;
+  fail("Facebook /me profile differs from the approved account");
+}
+
+function requireFacebookProbeHandle(probe, record) {
+  if (probe.id !== record.id || probe.url !== record.urlMethod
+      || probe.playwright !== record.playwright || probe.close !== record.closeMethod) {
+    fail("Facebook account probe handle changed");
+  }
+}
+
+async function readFacebookProbeUrl(probe, record, account) {
+  requireFacebookProbeHandle(probe, record);
+  const before = facebookProbeUrl(listedTab(await freshBrowser(), record.id).url, account);
+  const actual = facebookProbeUrl(await record.urlMethod.call(probe), account);
+  const after = facebookProbeUrl(listedTab(await freshBrowser(), record.id).url, account);
+  requireFacebookProbeHandle(probe, record);
+  // Only natural /me navigation may still be pending. No alternative URL is
+  // navigated and no rejected identity/challenge is retried.
+  if ([before, actual, after].includes(FACEBOOK_ME_URL)) return null;
+  if (before !== actual || after !== actual) fail("Facebook account probe URL is unstable");
+  return actual;
+}
+
+async function closeFacebookProbe(probe, record) {
+  requireFacebookProbeHandle(probe, record);
+  listedTab(await freshBrowser(), record.id);
+  await record.closeMethod.call(probe);
+  if ((await freshBrowser()).tabs.some((tab) => tab.id === record.id)) {
+    fail("Facebook account probe did not close");
+  }
+}
+
+/**
+ * Verify login identity through one fixed /me probe, not composer-actor proof.
+ * The profile handle is never retained by the general post/comment facade or
+ * returned to the caller. The retained source tab is never navigated/closed.
+ */
+export async function verifyCommentCuaFacebookAccount(retainedSourceTab, expectedAccount) {
+  if (arguments.length !== 2) fail("Facebook account probe accepts only a retained tab and account key");
+  const account = facebookAccountKey(expectedAccount);
+  if (!isCommentCuaTab(retainedSourceTab)) fail("Facebook source Tab is not retained by this CUA runtime");
+  const sourceRecord = tabRecords.get(retainedSourceTab);
+  const sourceUrl = exactMetaUrl(listedTab(await freshBrowser(), sourceRecord.id).url);
+  if (!/^(?:www\.|m\.)?facebook\.com$/u.test(new URL(sourceUrl).hostname)) {
+    fail("Facebook account probe requires a retained Facebook target");
+  }
+  await inspectHandle(retainedSourceTab, sourceRecord, sourceUrl);
+  const before = await freshBrowser();
+  if (exactMetaUrl(listedTab(before, sourceRecord.id).url) !== sourceUrl) fail("Facebook source URL changed");
+  const existingIds = new Set(before.tabs.map((tab) => tab.id));
+  let probe;
+  let record;
+  let ownsProbe = false;
+  try {
+    probe = await runtime.createBrowserTab(runtime.identity.id, FACEBOOK_ME_URL, {
+      sessionName: "🔎 Social Post account",
+    });
+    const id = text(probe?.id, "Facebook account probe tab ID");
+    if (existingIds.has(id) || handlesById.has(id) || ownedTabs.has(probe)) {
+      fail("Facebook account probe must be a newly created tab");
+    }
+    record = { ...handleRecord(probe, id), closeMethod: probe.close };
+    if (typeof record.closeMethod !== "function") fail("Facebook account probe cannot be safely closed");
+    const entry = listedTab(await freshBrowser(), id);
+    ownsProbe = true;
+    facebookProbeUrl(entry.url, account);
+    const banner = record.playwright.getByRole("banner");
+    await banner.waitFor({ state: "visible", timeoutMs: 10000 });
+    for (let pass = 0; pass < 3; pass += 1) {
+      if (await banner.count() !== 1) fail("Facebook account probe banner is not unique");
+      const observed = await readFacebookProbeUrl(probe, record, account);
+      if (observed === null) continue;
+      if (await readFacebookProbeUrl(probe, record, account) !== observed) {
+        fail("Facebook account probe URL is unstable");
+      }
+      return;
+    }
+    fail("Facebook /me redirect is not complete");
+  } finally {
+    try {
+      // A reused ID or foreign-browser handle is never cleanup authority.
+      if (ownsProbe) await closeFacebookProbe(probe, record);
+    } finally {
+      await inspectHandle(retainedSourceTab, sourceRecord, sourceUrl);
+    }
+  }
 }

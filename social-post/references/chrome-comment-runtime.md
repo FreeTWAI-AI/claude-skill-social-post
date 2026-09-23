@@ -19,16 +19,22 @@ caller 指定 tab、receipt、resolver 或 callback。初始化失敗、Chrome i
 來自官方 runtime。它不宣稱 browser-client hash 認證、physical document epoch 或
 持久 DOM node identity。不得讀未文件化的 `dom_cua`／內部 transport。
 
-CUA fused 路徑沿用同一 target intake、durable claim、finish 與 recovery 帳本；
-單則送出候選目前只接 Threads 的原生零回覆與來源選取 modal；2026-09-05 已送出一次，
-並取得原生 own-child 正向觀測，canonical ledger 尚為 `needs_reconcile`，待唯讀結算。
-舊 SDK IG 的歷史成功不能推導當前 CUA 已支援 IG。最後一次 lease 檢查
+CUA fused 路徑沿用同一 target intake、durable claim、finish 與 recovery 帳本。
+Threads 使用原生零回覆與來源選取 modal；2026-09-05 的單次送出已經唯讀 recovery
+結算為 `reconciled_sent`，沒有重送。IG 已接入正數回覆展開、零 own baseline、來源點選
+及原生 `@author ` 前綴的 semantic v2 preparation；離線整合與 recovery 分流通過，
+當前 CUA 的真實 IG 送出仍未驗證，不能引用舊 SDK 成功替代。最後一次 lease 檢查
 後，重新核對原留言、actor、modal、完整核准文字及唯一可用送出鈕，再以文件化
 locator click 點一次。這是語義 UI continuity，仍有 DOM 變化競態；不把 click 回傳
 當成功，必須查到正確父留言下的新 exact-own 原生子回覆並完成有效帳本結算。
 呼叫 submit 後的錯誤／timeout／查不到結果一律 unknown 並停止，不 retry；送出前
-不支援或驗證失敗則停止，不偽稱已嘗試送出。其他平台送出在填字與 claim 之前拒絕，直到它們的
+不支援或驗證失敗則停止，不偽稱已嘗試送出。FB 送出在填字與 claim 之前拒絕，直到其
 CUA selection contract 完成。此路徑不升級泛用 production、fixture 或實體節點能力。
+IG 對帳只走原生回覆展開與正向讀取，不能呼叫要求零 own baseline 的 selection。
+內部 ownership 檢查使用 `getState({emit:false})`；仍逐次取得 fresh state，不快取或省略查核。
+
+FB 登入身分檢查另由來源建立固定 `/me/` 暫時分頁，核對核准 profile 的穩定原生跳轉後
+只關閉自己的 probe；不導航原留言頁。這只驗登入身分，不證明 composer 的 Page／profile actor。
 
 以下舊 runtime 只適用仍提供對應已文件化 SDK 的環境。固定套件不存在時不可使用，
 不能只改 pin 便宣稱已支援目前 CUA。
@@ -56,19 +62,19 @@ CUA selection contract 完成。此路徑不升級泛用 production、fixture �
 
 target-only intake 與唯讀 recovery 共用來源自己的新鮮 tab 清單尋找 exact permalink：
 唯一相符時借用並保留該 tab，不因開始檢查而 reload，結束不關閉；零相符才建立
-自己的暫時 tab，多個相符則停止。handle ID 和 URL 在取得及檢查完成後都再次核對，
+自己的暫時 tab。一般 intake 遇多個相符仍停止；唯讀 recovery 則建立自己的 exact-target
+暫時 tab，不任選或關閉既有相符分頁。handle ID 和 URL 在取得及檢查完成後都再次核對，
 不接受 caller 指定 tab 或 browser。送出仍使用來源建立的專用 tab，不沿用借用規則。
 
 recovery 前置觀測須在 wrapper 的最後一次 identity／URL 核對通過後，才可輪替
 authority；其後再經一次 fresh wrapper 觀測及最後核對，才提交 receipt。
-這不表示 recovery 完全不導航：正向 reader 仍會開啟當下觀測到的 own-child permalink，
-驗證 immediate parent／own account／完整本文，再還原原留言 URL。未能還原或查證
-即維持 unknown，不送出、不重送；前置觀測 unresolved 時不輪替 capability，已有
+CUA Threads 正向 reader 在獨立、來源建立的暫時分頁開啟當下觀測到的 own-child permalink，
+驗證 immediate parent／own account／完整本文，保留原留言頁不導航；legacy 才沿用
+導覽後還原。未能查證或最終 parent 檢查失敗即維持 unknown，不送出、不重送；前置觀測 unresolved 時不輪替 capability，已有
 recovery context 的 unresolved 則保留現有 capability，回傳 `committed:false`。
-此 exact-tab recovery 來源修正已通過 focused tests；當輪真實執行在原生檢查前遇到
-`Debugger unattached`。fresh tab 清單及 URL 可讀不代表 AX／DOM 控制通道正常，
-目前未新增 recovery／rotation 事件；結算仍待 Chrome 控制連線恢復，不宣稱 live repair
-完成，也不再反覆嘗試或重送原回覆。
+2026-09-05 已用此路徑完成真實 Threads 唯讀結算，canonical 原 attempt 為 `reconciled_sent`。
+舊分頁的 debugger／DOM 失效不代表整個 Chrome 離線；fresh tab 清單或 URL 可讀也不代表
+原生內容可查。未知時依具體證據處理，不反覆使用同一失效 handle，也不重送原回覆。
 
 ## Threads icon-only 控制辨識
 

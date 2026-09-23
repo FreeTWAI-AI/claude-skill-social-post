@@ -84,6 +84,7 @@ LIVE_SURFACE_SOURCES = [
     "scripts/comment_chrome_threads_modal_reader.mjs",
     "scripts/comment_chrome_threads_result_reader.mjs",
     "scripts/comment_chrome_instagram_surface.mjs",
+    "scripts/comment_chrome_instagram_selection.mjs",
     "scripts/comment_chrome_instagram_reader.mjs",
 ]
 FIXTURE_RUNTIME_SOURCES = [

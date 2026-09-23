@@ -47,6 +47,7 @@ function fixture(options = {}) {
     existing: mockTab("existing-tab", options.targetUrl ?? targetUrl), created: mockTab("created-tab", "about:blank"),
     calls: { browser: 0, legacyBrowser: 0, cuaBrowser: 0, cuaChecks: [], list: 0, get: [], new: 0, newArgs: [],
       bind: 0, inspect: 0, timers: [], authorization: 0 }, ...options };
+  current.createdRecords = [current.created];
   current.browser = { tabs: {
     list: async () => {
       current.calls.list += 1;
@@ -63,6 +64,11 @@ function fixture(options = {}) {
       current.calls.new += 1;
       current.calls.newArgs.push(url);
       if (current.newError) throw current.newError;
+      if (current.calls.new > 1) {
+        current.created = mockTab(`created-tab-${current.calls.new}`, "about:blank");
+        current.createdRecords.push(current.created);
+      }
+      current.onCreated?.(current.created);
       if (current.cua) current.created.href = current.created.gotoUrl ?? url;
       return current.created.tab;
     },
@@ -101,9 +107,13 @@ function fixture(options = {}) {
 }
 
 function testSourceOwnershipAndCommitOrdering() {
-  assert.doesNotMatch(source, /export\s+(?:async\s+)?function\s+(?:requireExactTargetIntakeTab|withSourceOwnedTargetIntakeTab)\b/u);
+  assert.doesNotMatch(source, /export\s+(?:async\s+)?function\s+(?:requireExactTargetIntakeTab|withSourceOwnedTargetIntakeTab|withSourceOwnedTargetTab)\b/u);
   assert.doesNotMatch(helperSource, /\b(?:recoverSourceOwnedChromeBrowser|claimTab|runPythonScanCommit|receipt_capability)\b|\bimport\s*\(|\.(?:fill|click|press|send|submit|reload)\s*\(/u);
   assert.match(helperSource, /const listed = await browser\.tabs\.list\(\);/u);
+  assert.match(helperSource, /withSourceOwnedTargetIntakeTab\(commentPermalink, inspect\) \{\s*return withSourceOwnedTargetTab\(commentPermalink, inspect, false\);/u);
+  assert.match(recoverySource, /withSourceOwnedTargetTab\(liveReplyUrl\(context\.action\), async \(tab\) => \{[\s\S]*?\}, true\);/u);
+  assert.equal((source.match(/withSourceOwnedTargetTab\(/gu) ?? []).length, 3,
+    "the shared private helper has only the fixed intake and recovery callers");
   assert.match(helperSource, /const result = await inspect\(tab\);\s*await requireExactTargetIntakeTab\(tab, expectedUrl, tabId\);\s*return result;/u);
   assert.match(observeSource, /const \{ first, second \} = await withSourceOwnedTargetIntakeTab\(request\.target\.comment_permalink, async \(tab\) =>/u);
   assert.equal((observeSource.match(/await readLiveTargetComment\(tab, sourceTarget\)/gu) ?? []).length, 2);
@@ -299,10 +309,11 @@ function recoveryFixture({ fresh = false, reads = ["positive"], ...options } = {
   const claimSubmit = forbidden("claim");
   const context = { action, preparation, attempt, claimSubmit };
   const contexts = new Map(fresh ? [] : [[key, context]]), inFlight = new Set();
-  for (const record of [current.existing, current.created]) {
+  current.onCreated = (record) => {
     for (const name of ["click", "fill", "press", "submit", "reload"]) record.tab[name] = forbidden(name);
     record.tab.dom_cua = { click: forbidden("dom_cua.click") };
-  }
+  };
+  for (const record of [current.existing, current.created]) current.onCreated(record);
   const api = runInNewContext(`${runtimeSource}\n${helperSource}\n${recoverySource}\n({ recoverLiveApprovedReply, reconcileLiveUncertainReply })`, {
     ...current.environment, Object, JSON, Set, Map,
     immutableJsonSnapshot: (value, label) => immutableJsonSnapshot(JSON.parse(JSON.stringify(value)), label),
@@ -385,26 +396,22 @@ async function testRecoveryUsesExactSourceOwnedTabAndCommitsAfterChecks() {
 }
 
 async function testRecoveryAmbiguityAndDriftNeverCommit() {
-  const ambiguous = recoveryFixture({ fresh: true });
-  ambiguous.current.listing = ["existing-tab", "other-tab"].map((id) => ({ id, url: ambiguous.current.targetUrl }));
-  await assert.rejects(ambiguous.recover(), /multiple exact URL tabs/u);
-  assert.equal(ambiguous.state.rotations, 0);
-  assert.equal(ambiguous.state.commits.length, 0);
-  assert.equal(ambiguous.state.observations, 0);
-  assert.equal(ambiguous.current.calls.new, 0);
-  assertRecoveryNeverWrites(ambiguous);
-
+  for (const ambiguous of [false, true]) {
   for (const drift of ["url-drift", "id-drift"]) {
     for (const stage of ["preinspection", "postrotation", "continuation", "new-tab"]) {
       const fresh = ["preinspection", "postrotation"].includes(stage);
       const test = recoveryFixture({ fresh, reads: stage === "postrotation" ? ["positive", drift] : [drift],
         ...(stage === "new-tab" ? { listing: [] } : {}) });
+      if (ambiguous) setRecoveryAmbiguousListing(test);
       await assert.rejects(fresh ? test.recover() : test.reconcile(), /tab (?:identity|URL) changed/u);
       assert.equal(test.state.commits.length, 0, "a URL/identity drift cannot escape as a committed receipt");
       assert.equal(test.state.rotations, stage === "postrotation" ? 1 : 0);
       assert.equal(test.contexts.has(test.key), stage !== "preinspection",
         "postrotation and continuation failures retain the private recovery context");
-      if (stage === "new-tab") assert.equal(test.current.created.calls.close, 1);
+      if (stage === "new-tab" || ambiguous) {
+        for (const record of test.current.createdRecords) assert.equal(record.calls.close, 1);
+      }
+      if (ambiguous) assert.deepEqual(test.current.calls.get, [], "ambiguous recovery never probes any existing match");
       assertRecoveryNeverWrites(test);
       if (stage === "postrotation") {
         test.current.existing.href = test.current.targetUrl;
@@ -416,6 +423,7 @@ async function testRecoveryAmbiguityAndDriftNeverCommit() {
       }
     }
   }
+  }
 
   const unknown = recoveryFixture({ fresh: true, reads: ["unknown"] });
   const unresolved = await unknown.recover();
@@ -426,7 +434,7 @@ async function testRecoveryAmbiguityAndDriftNeverCommit() {
   assert.equal(unknown.state.commits.length, 0);
   assertRecoveryNeverWrites(unknown);
 
-  for (const key of ["tab", "tabId", "browser", "inspect", "reply_text"]) {
+  for (const key of ["tab", "tabId", "browser", "inspect", "reply_text", "recoveryOnlyFreshOnAmbiguity"]) {
     const injected = recoveryFixture({ fresh: true });
     await assert.rejects(injected.recover({ ...injected.request, [key]: "caller supplied" }), /accepts only intentId/u);
     assert.equal(injected.current.calls.browser, 0);
@@ -434,6 +442,42 @@ async function testRecoveryAmbiguityAndDriftNeverCommit() {
     assert.equal(injected.state.commits.length, 0);
     assertRecoveryNeverWrites(injected);
   }
+}
+
+function setRecoveryAmbiguousListing(test) {
+  test.current.listing = ["existing-tab", "other-tab"].map((id) => ({ id, url: test.current.targetUrl }));
+}
+
+async function testRecoveryAmbiguityCreatesIsolatedOwnedTabs() {
+  for (const fresh of [false, true]) {
+    const test = recoveryFixture({ fresh });
+    setRecoveryAmbiguousListing(test);
+    assert.equal((await (fresh ? test.recover() : test.reconcile())).outcome, "sent");
+    const inspections = fresh ? 2 : 1;
+    assert.equal(test.state.observations, inspections);
+    assert.equal(test.state.rotations, fresh ? 1 : 0);
+    assert.equal(test.state.commits.length, 1);
+    assert.deepEqual(test.current.calls.get, [], "ambiguous listed tabs must not be selected or probed");
+    assert.deepEqual(test.current.calls.newArgs, Array(inspections).fill(test.current.targetUrl));
+    assert.equal(test.current.createdRecords.length, inspections);
+    for (const record of test.current.createdRecords) {
+      assert.equal(record.calls.close, 1, "each isolated source-owned inspection tab is closed once");
+      assert.deepEqual(record.calls.goto, [], "CUA creates directly at the exact target without a second navigation");
+      assert.equal(record.calls.url, 2);
+    }
+    assert.equal(test.current.existing.calls.url, 0, "listing metadata never grants access to either ambiguous existing handle");
+    assertRecoveryNeverWrites(test);
+  }
+  const wrongInitialUrl = recoveryFixture({ fresh: true });
+  setRecoveryAmbiguousListing(wrongInitialUrl);
+  wrongInitialUrl.current.created.gotoUrl = wrongInitialUrl.current.targetUrl.replace("Comment456", "Other789");
+  await assert.rejects(wrongInitialUrl.recover(), /tab URL changed/u);
+  assert.equal(wrongInitialUrl.state.observations, 0);
+  assert.equal(wrongInitialUrl.state.rotations, 0);
+  assert.equal(wrongInitialUrl.state.commits.length, 0);
+  assert.deepEqual(wrongInitialUrl.current.calls.get, []);
+  assert.equal(wrongInitialUrl.current.created.calls.close, 1);
+  assertRecoveryNeverWrites(wrongInitialUrl);
 }
 
 testSourceOwnershipAndCommitOrdering();
@@ -446,10 +490,11 @@ await testFailuresNeverRetryAndRespectCleanupOwnership();
 await testCallerCannotProvideTabOrBrowserAuthority();
 await testCuaCreatesAtExactUrlAndChecksIdentityTwice();
 await testRecoveryUsesExactSourceOwnedTabAndCommitsAfterChecks();
+await testRecoveryAmbiguityCreatesIsolatedOwnedTabs();
 await testRecoveryAmbiguityAndDriftNeverCommit();
 for (const current of fixtures) {
   assert.equal(current.existing.calls.close, 0, "borrowed tabs are never closed, including on failure");
   assert.deepEqual(current.existing.calls.goto, [], "borrowed tabs are never navigated or force-reloaded");
-  assert.ok(current.created.calls.goto.length <= 1 && current.created.calls.close <= 1);
+  for (const record of current.createdRecords) assert.ok(record.calls.goto.length <= 1 && record.calls.close <= 1);
 }
 console.log("PASS source-owned exact target intake tab reuse tests (mocked; no browser)");

@@ -233,7 +233,7 @@ const liveRecoverySource = bridgeSource.slice(recoverySourceStart, recoverySourc
 assert.match(liveRecoverySource, /DEFAULT_SCRIPT, "browser-recovery-action"/u);
 assert.match(liveRecoverySource, /shell: false, windowsHide: true/u);
 assert.match(liveRecoverySource, /preparation\.action_digest !== actionDigest\(action\)/u);
-assert.match(liveRecoverySource, /withSourceOwnedTargetIntakeTab\(liveReplyUrl\(context\.action\), async \(tab\) =>/u);
+assert.match(liveRecoverySource, /withSourceOwnedTargetTab\(liveReplyUrl\(context\.action\), async \(tab\) =>/u);
 assert.doesNotMatch(liveRecoverySource, /createLiveCommentTab\(|\.tabs\.(?:new|get)\(|\.(?:reload|close)\(/u);
 assert.match(liveRecoverySource, /recoverPythonLedgerReconcile\(claimSubmit, request\)/u);
 assert.match(liveRecoverySource, /context\.claimSubmit, "browser-reconcile", receipt/u);

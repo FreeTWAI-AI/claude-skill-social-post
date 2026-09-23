@@ -2,6 +2,7 @@
 import { digestObject, fail, unique } from "./comment_chrome_common.mjs";
 import { liveReplyUrl, normalize } from "./comment_chrome_live_common.mjs";
 import { threadsNativeTarget, readThreadsNativeComment } from "./comment_chrome_threads_reader.mjs";
+import { getCommentCuaBrowser, isCommentCuaTab, requireCommentCuaTab } from "./comment_cua_runtime.mjs";
 
 /** Discovery is not parent evidence. The candidate must be opened and verified. */
 export function discoverThreadsOwnChildLinks(root, expected) {
@@ -46,8 +47,42 @@ async function waitForFocus(tab, native) {
     .waitFor({ state: "visible", timeoutMs: 10000 });
 }
 
+async function verifyNativeChild(tab, child, native, action) {
+  await waitForFocus(tab, child);
+  const first = await readThreadsNativeComment(tab, child);
+  const second = await readThreadsNativeComment(tab, child);
+  if (first.evidence.author !== native.account || second.evidence.author !== native.account
+      || first.evidence.body !== normalize(action.reply_text)
+      || second.evidence.body !== normalize(action.reply_text)
+      || digestObject(first.documentBinding) !== digestObject(second.documentBinding)
+      || digestObject(first.evidence) !== digestObject(second.evidence)) {
+    fail("Threads native child does not prove the approved text and immediate parent");
+  }
+}
+
+async function verifyCuaNativeChild(parentTab, child, native, action) {
+  await requireCommentCuaTab(parentTab, native.commentUrl);
+  // Direct creation preserves CUA DOM control. Never borrow an existing child
+  // tab or navigate the original parent merely to inspect this observed link.
+  const childTab = await getCommentCuaBrowser().tabs.new(child.commentUrl);
+  try {
+    await requireCommentCuaTab(childTab, child.commentUrl);
+    await verifyNativeChild(childTab, child, native, action);
+    await requireCommentCuaTab(childTab, child.commentUrl);
+  } finally {
+    let timer;
+    try {
+      await Promise.race([childTab.close(), new Promise((resolve) => { timer = setTimeout(resolve, 2000); })]);
+    } catch { /* owned-tab cleanup never retries or submits */ }
+    finally { clearTimeout(timer); }
+  }
+  await requireCommentCuaTab(parentTab, native.commentUrl);
+}
+
 export async function inspectThreadsPositiveResult(tab, action) {
   const native = targetForAction(action);
+  const cua = isCommentCuaTab(tab);
+  if (cua) await requireCommentCuaTab(tab, native.commentUrl);
   const parent = await readThreadsNativeComment(tab, native);
   requireParent(parent, action);
   const raw = await parent.region.evaluate(discoverThreadsOwnChildLinks, native);
@@ -61,29 +96,19 @@ export async function inspectThreadsPositiveResult(tab, action) {
     // context rows. This positive-only chain is never passed to zero intake.
     resultAncestorPaths: [native.postPath, native.targetPath],
   };
-  let verified;
-  try {
+  if (cua) {
+    await verifyCuaNativeChild(tab, child, native, action);
+  } else try {
     // Only the observed own-account candidate is visited. Row ordering or a
     // count match alone never establishes which comment received the reply.
     await tab.goto(child.commentUrl);
-    await waitForFocus(tab, child);
-    const first = await readThreadsNativeComment(tab, child);
-    const second = await readThreadsNativeComment(tab, child);
-    if (first.evidence.author !== native.account || second.evidence.author !== native.account
-        || first.evidence.body !== normalize(action.reply_text)
-        || second.evidence.body !== normalize(action.reply_text)
-        || digestObject(first.documentBinding) !== digestObject(second.documentBinding)
-        || digestObject(first.evidence) !== digestObject(second.evidence)) {
-      fail("Threads native child does not prove the approved text and immediate parent");
-    }
-    verified = true;
+    await verifyNativeChild(tab, child, native, action);
   } finally {
     // Restore the action URL for the existing finish/recovery receipt contract.
     // A failed restore remains unknown and must never trigger another submit.
     await tab.goto(native.commentUrl);
     await waitForFocus(tab, native);
   }
-  if (!verified) fail("Threads native child verification is incomplete");
   const restored = await readThreadsNativeComment(tab, native);
   requireParent(restored, action);
   const finalRaw = await restored.region.evaluate(discoverThreadsOwnChildLinks, native);
@@ -98,6 +123,7 @@ export async function inspectThreadsPositiveResult(tab, action) {
       || await tab.url() !== finalParent.observedUrl) {
     fail("Threads target changed after final child discovery");
   }
+  if (cua) await requireCommentCuaTab(tab, native.commentUrl);
   return { observedUrl: restored.observedUrl, complete: false,
     verifiedNewReply: true, exactOwnCount: 1, ownReplyCount: 1,
     totalReplies: restored.evidence.replyCount, replyPermalink: candidate.permalink,

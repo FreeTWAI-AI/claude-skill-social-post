@@ -4,6 +4,10 @@ import { assertAction, bindObservedSubmitNode } from "./comment_chrome_send_supp
 import { inspectFacebook } from "./comment_chrome_facebook_surface.mjs";
 import { inspectThreads } from "./comment_chrome_threads_surface.mjs";
 import { inspectInstagram } from "./comment_chrome_instagram_surface.mjs";
+import { isCommentCuaTab } from "./comment_cua_runtime.mjs";
+import {
+  prepareInstagramCanarySelection, revalidateInstagramCanarySelection,
+} from "./comment_chrome_instagram_selection.mjs";
 import { readLiveTargetComment as readInstagramTargetComment } from "./comment_chrome_instagram_reader.mjs";
 import { readFacebookTargetComment } from "./comment_chrome_facebook_reader.mjs";
 import { readThreadsTargetComment } from "./comment_chrome_threads_reader.mjs";
@@ -18,9 +22,11 @@ import {
 
 export { bindLiveReplyBrowser } from "./comment_chrome_facebook_surface.mjs";
 export { liveReplyUrl } from "./comment_chrome_live_common.mjs";
-export { revalidateThreadsSelection };
+export { revalidateThreadsSelection, prepareInstagramCanarySelection, revalidateInstagramCanarySelection };
 
 export async function prepareLiveReplyThread(tab, action) {
+  // Expansion is also used by positive-only recovery. Never source-select a
+  // reply or require a zero-own baseline merely to inspect an existing child.
   if (action.scope.platform === "instagram") return prepareInstagramThread(tab, action);
   if (action.scope.platform === "threads") return prepareThreadsCanaryReply(tab, action);
   fail("native canary preparation is unavailable for this platform");
@@ -34,6 +40,7 @@ export async function inspectLiveCanaryResult(tab, action) {
 
 export async function inspectLiveCanarySurface(tab, action) {
   if (action.scope.platform === "threads") return inspectThreadsCanarySurface(tab, action);
+  if (action.scope.platform === "instagram" && isCommentCuaTab(tab)) return revalidateInstagramCanarySelection(tab, action);
   return inspectLiveReplySurface(tab, action, "before");
 }
 

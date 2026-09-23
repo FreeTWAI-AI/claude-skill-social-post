@@ -1,6 +1,7 @@
 /** Source-owned Facebook account and exact-parent read-only inspection. */
 import { fail, requiredString, unique } from "./comment_chrome_common.mjs";
 import { currentUrl, trustedUrl } from "./comment_chrome_live_common.mjs";
+import { isCommentCuaTab, verifyCommentCuaFacebookAccount } from "./comment_cua_runtime.mjs";
 
 const inspectionBrowsers = new WeakMap();
 
@@ -14,6 +15,11 @@ export async function verifyFacebookAccount(tab, action) {
   const key = action.scope.account_key;
   const browser = inspectionBrowsers.get(tab);
   if (!browser) fail("Facebook account verification requires the source-owned browser");
+  if (isCommentCuaTab(tab)) {
+    // Login identity only; this does not verify a selected composer actor.
+    await verifyCommentCuaFacebookAccount(tab, key);
+    return;
+  }
   const probe = await browser.tabs.new();
   try {
     await probe.goto("https://www.facebook.com/me/");
