@@ -1,6 +1,6 @@
 # social-post skill
 
-一個可安裝到 Codex 或 Claude Code 的社群內容 Skill：學習本機聲線、規劃內容、撰寫平台化貼文、經確認後發布，以已登入 Chrome 受控管理 FB／IG／Threads 留言，並把跨平台洞察保存成可驗證的結構化資料。
+一個可安裝到 Codex 或 Claude Code 的社群內容 Skill；另提供精簡的 ChatGPT Chat 版。可學習本機聲線、規劃內容、撰寫平台化貼文、經確認後發布，以已登入 Chrome 受控管理 FB／IG／Threads 留言，並把跨平台洞察保存成可驗證的結構化資料。
 
 目前穩定標籤：**v2.5.0**；`main` 已同步 **Unreleased candidate**。
 
@@ -75,6 +75,8 @@ Copy-Item -Recurse ".\claude-skill-social-post\social-post" "$env:USERPROFILE\.c
 ```
 
 Claude Code：把目的地改成 `.claude\skills\social-post`。macOS／Linux 可複製到 `~/.codex/skills/social-post/` 或 `~/.claude/skills/social-post/`。
+
+ChatGPT Chat：可在「技能 → 建立 → 透過編輯器建立」使用 [`chatgpt-socialpost/SKILL.md`](chatgpt-socialpost/SKILL.md) 的公開規則，並在個人化設定保留自己的私人語氣簡卡。這個精簡版不包含本機分析腳本、Chrome 留言操作或任何作者的私人樣本；只安裝公開規則，不代表已完成個人聲線校準。不要把私人貼文、帳號數據或憑證提交到本 repo。
 
 首次使用先建立只存在本機的個人檔：
 
