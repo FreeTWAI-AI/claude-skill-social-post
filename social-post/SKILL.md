@@ -1,6 +1,6 @@
 ---
 name: social-post
-description: 學習使用者的 Facebook／Instagram／YouTube／Threads／X 語氣與受眾，規劃、撰寫、確認後發佈內容；以已登入 Chrome 受控掃描、草擬及回覆 FB／IG／Threads 留言；並作為流量、留存與轉化的結構化帳本。使用者說「發文」「用我的口氣」「回覆留言」「自動回留言」「掃留言」「查流量」「演算法」「把數據訓練進去」「比較貼文」「優化 pattern」時使用。
+description: 依使用者真實貼文與成效寫 Facebook／Instagram／YouTube／Threads／X 文案，包含 ChatGPT Chat 的「寫文」「Mode C」「用我的格式／口氣」「黑底白字」；規劃、確認後發布、留言回覆及成效學習。使用者說「發文」「文案」「回覆留言」「查流量」「把數據訓練進去」「比較貼文」「優化 pattern」時使用。
 ---
 
 # Social Post
@@ -11,7 +11,7 @@ P5 執行前核對 `references/chrome-comment-adapter.md` 的當前狀態。CUA 
 
 ## Session 啟動
 
-P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要求深度仿寫，或 quick card 無法裁決時，才完整讀 `style_profile.md` 或使用者明確指定的 voice Skill。安全與使用者明示 > voice quick／明確指定的 voice Skill > 公式。
+P2 預設讀 `voice_quick.md`；只有 P1 重新學語氣、使用者明確要求深度仿寫，或 quick card 無法裁決時，才完整讀 `style_profile.md` 或使用者明確指定的 voice Skill。ChatGPT Chat 若沒有本機檔案／shell，依 `references/generate_and_publish.md` 的降階流程；只讀到公開範本或 GitHub repo，不代表已載入使用者的私人 voice。安全與使用者明示 > voice quick／明確指定的 voice Skill > 公式。
 
 ## 路由
 
